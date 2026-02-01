@@ -1,0 +1,99 @@
+ASAM Project Directory Structure
+=================================
+
+asam-attention-main/
+├── [Core Project Files]
+│   ├── README.md                  ← 项目入口，用户先看这个
+│   ├── setup.py                   ← Python包配置
+│   ├── requirements.txt           ← 依赖列表
+│   ├── LICENSE                    ← MIT许可证
+│   ├── .gitignore                 ← Git忽略规则
+│   ├── PROJECT_STRUCTURE.md       ← 项目结构说明
+│   └── DIRECTORY_TREE.txt         ← 本文件
+│
+├── [Sensitive Config] 🔒
+│   ├── .env                       ← GitHub Token（Git忽略）
+│   └── .env.example               ← 配置模板（可提交）
+│
+├── asam/                          ← 🎯 核心代码库
+│   ├── __init__.py
+│   ├── asam_layer.py              ← 原版ASAM
+│   ├── efficient_attention.py     ← Flash Attention优化 ⭐
+│   ├── asam_layer_optimized.py    ← 真正稀疏注意力
+│   ├── adaptive_gate.py
+│   ├── sparse_patterns.py
+│   ├── flash_asam.py
+│   ├── quantization.py
+│   └── utils.py
+│
+├── tests/                         ← 🧪 单元测试
+│   ├── test_basic.py
+│   ├── test_efficient.py
+│   └── test_asam.py
+│
+├── examples/                      ← 💡 使用示例
+│   ├── basic_usage.py
+│   └── optimized_usage.py         ← Flash + FP16示例
+│
+├── experiments/                   ← 📊 实验和基准测试
+│   ├── run_final_benchmark.py
+│   ├── train_mixed_precision.py
+│   ├── benchmark_optimized.py
+│   └── results_3060/              ← 测试结果
+│
+├── docs/                          ← 📚 文档
+│   ├── README.md
+│   ├── API.md
+│   ├── TECHNICAL.md
+│   ├── analysis_report.md         ← 性能分析报告
+│   ├── performance_analysis.png   ← 性能图表
+│   ├── GITHUB_RELEASE_GUIDE.md
+│   └── security/                  ← 安全相关
+│       ├── SECURITY_BEST_PRACTICES.md
+│       └── SECURITY_CHECK_REPORT.md
+│
+├── tools/                         ← 🛠️ 开发工具（非核心）
+│   └── github-setup/              ← GitHub配置辅助
+│       ├── check_setup.py
+│       ├── push_to_github.py
+│       ├── diagnose_token.py
+│       ├── setup_github_token.bat
+│       ├── setup_github_token.ps1
+│       ├── GITHUB_SETUP_GUIDE.md
+│       ├── SCRIPT_GUIDE.md
+│       ├── create_classic_token.md
+│       └── configure_fine_grained_pat.md
+│
+├── scripts/                       ← 🔧 其他脚本
+│   └── analyze_paper.py           ← 论文分析工具
+│
+├── benchmarks/                    ← 📈 基准测试工具
+├── datasets/                      ← 📦 数据集工具
+├── paper/                         ← 📝 论文相关
+└── tutorials/                     ← 📖 教程
+
+[Git/System Directories]
+├── .github/                       ← GitHub Actions配置
+└── .venv/                         ← Python虚拟环境（Git忽略）
+
+
+Legend:
+------
+🎯  Core code        - 项目核心，必须保留
+🧪  Tests            - 单元测试
+💡  Examples         - 使用示例
+📊  Experiments      - 基准测试
+📚  Documentation    - 项目文档
+🛠️  Tools            - 开发辅助工具（可删除）
+🔧  Scripts          - 辅助脚本
+🔒  Sensitive        - 敏感文件（Git忽略）
+
+
+Quick Navigation:
+----------------
+- 想了解项目？      → README.md
+- 想使用ASAM？      → examples/
+- 想跑测试？        → tests/
+- 想配置GitHub？    → tools/github-setup/
+- 想看性能数据？    → experiments/results_3060/
+- 想了解安全？      → docs/security/
