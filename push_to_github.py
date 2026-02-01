@@ -23,37 +23,65 @@ from pathlib import Path
 
 def get_github_token():
     """
-    从环境变量获取 GitHub Token。
+    从环境变量或 .env 文件获取 GitHub Token。
     
     安全提示:
         - Token 永远不会保存在代码中
         - Token 不会被打印到屏幕
         - Token 不会被记录到日志
     
-    设置方法:
-        Windows PowerShell:
+    设置方法 (按优先级):
+        方法 1 - 环境变量:
             $env:GITHUB_TOKEN = "ghp_xxxxxxxx"
         
-        Windows (永久):
-            [Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "ghp_xxxxxxxx", "User")
+        方法 2 - .env 文件 (推荐):
+            创建 .env 文件，内容: GITHUB_TOKEN=ghp_xxxxxxxx
+            (确保 .env 在 .gitignore 中！)
         
-        Linux/Mac:
-            export GITHUB_TOKEN="ghp_xxxxxxxx"
+        方法 3 - 永久设置:
+            [Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "ghp_xxxxxxxx", "User")
     """
-    # 尝试读取环境变量
+    # 尝试 1: 从环境变量读取
     token = os.getenv("GITHUB_TOKEN")
+    source = "环境变量"
+    
+    # 尝试 2: 从 .env 文件读取
+    if not token and Path(".env").exists():
+        try:
+            with open(".env", "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    # 跳过注释和空行
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("GITHUB_TOKEN="):
+                        token = line.split("=", 1)[1].strip()
+                        token = token.strip('"\'')  # 去除引号
+                        source = ".env 文件"
+                        break
+        except Exception as e:
+            print(f"⚠️  读取 .env 文件失败: {e}")
     
     if not token:
-        print("❌ 错误: 找不到 GITHUB_TOKEN 环境变量！")
-        print("\n请设置环境变量:")
-        print("  PowerShell: $env:GITHUB_TOKEN = '你的token'")
-        print("  永久设置:   [Environment]::SetEnvironmentVariable('GITHUB_TOKEN', '你的token', 'User')")
+        print("❌ 错误: 找不到 GITHUB_TOKEN！")
+        print("\n解决方法（选择一种）:")
+        print("\n方法 1 - 临时设置 (立即生效):")
+        print("  $env:GITHUB_TOKEN = '你的token'")
+        print("\n方法 2 - .env 文件 (推荐):")
+        print("  1. 确保 .env 文件存在")
+        print("  2. 内容: GITHUB_TOKEN=你的token")
+        print("  3. 确保 .env 在 .gitignore 中")
+        print("\n方法 3 - 永久设置:")
+        print("  [Environment]::SetEnvironmentVariable('GITHUB_TOKEN', '你的token', 'User')")
+        print("  然后重启 PowerShell")
         print("\n获取 Token: https://github.com/settings/tokens")
         sys.exit(1)
     
+    print(f"   ✅ 从 {source} 读取到 Token")
+    
     # 验证 Token 格式 (简单检查)
     if not token.startswith(("ghp_", "github_pat_")):
-        print("⚠️ 警告: Token 格式看起来不对，应该以 ghp_ 或 github_pat_ 开头")
+        print("⚠️  警告: Token 格式看起来不对，应该以 ghp_ 或 github_pat_ 开头")
         confirm = input("是否继续? (yes/no): ")
         if confirm.lower() != "yes":
             sys.exit(0)
