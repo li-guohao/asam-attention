@@ -16,12 +16,17 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 setup(
     name="asam-attention",
     version="1.1.1",
-    author="ASAM Team",
-    author_email="your.email@example.com",
+    author="Guohao Li",
+    author_email="li-guohao@users.noreply.github.com",
     description="Adaptive Sparse Attention Module with Flash Attention optimization",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/asam-attention",
+    url="https://github.com/li-guohao/asam-attention",
+    project_urls={
+        "Source": "https://github.com/li-guohao/asam-attention",
+        "Issues": "https://github.com/li-guohao/asam-attention/issues",
+        "Releases": "https://github.com/li-guohao/asam-attention/releases",
+    },
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
