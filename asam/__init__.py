@@ -18,7 +18,7 @@ from .sparse_patterns import (
 )
 from .adaptive_gate import AdaptiveGate
 
-__version__ = "0.1.0"
+__version__ = "1.1.1"
 __all__ = [
     "ASAMLayer",
     "ASAMConfig", 

@@ -15,7 +15,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="asam-attention",
-    version="1.1.0",
+    version="1.1.1",
     author="ASAM Team",
     author_email="your.email@example.com",
     description="Adaptive Sparse Attention Module with Flash Attention optimization",
