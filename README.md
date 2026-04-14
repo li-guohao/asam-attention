@@ -1,197 +1,256 @@
-# ASAM: Adaptive Sparse Attention Module ⚡
+# ASAM: Adaptive Sparse Attention Module
 
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange.svg)](https://pytorch.org/)
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[中文说明](README.zh-CN.md)
+
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/li-guohao/asam-attention)](https://github.com/li-guohao/asam-attention/releases)
 
-**ASAM** is an efficient attention mechanism that combines adaptive sparsity patterns with hardware-optimized implementations, achieving **5.45x speedup** on consumer GPUs.
+ASAM is a research-oriented attention module that combines **adaptive sparse patterns** with **hardware-aware optimized implementations** for long-sequence modeling.
 
-## 🚀 Key Features
+This repository includes:
 
-- **⚡ Flash Attention Integration**: Up to 4.5x faster forward pass
-- **🔧 Mixed Precision Training**: Additional 2x speedup with FP16
-- **💾 Memory Efficient**: Process 2-4x longer sequences
-- **🎯 Adaptive Sparsity**: Dynamic pattern selection based on input
-- **💻 Consumer GPU Optimized**: Tested on RTX 3060 12GB
+- the original `ASAMLayer` implementation,
+- efficient PyTorch 2.x attention variants built on `scaled_dot_product_attention`,
+- a true sparse optimized path for local and strided attention,
+- profiling and benchmarking scripts for sparse pattern construction and runtime behavior.
 
-## 📊 Performance Highlights
+## Highlights
 
-### Speedup on RTX 3060
+- Adaptive sparse attention with local, strided, random, clustered, and hierarchical patterns
+- Optimized inference paths for consumer GPUs
+- Flash / SDPA-based efficient attention variants for PyTorch 2.x
+- Mixed precision training examples
+- Sparse pattern profiling and optimization reports
+- End-to-end tests covering core layers and sparse pattern behavior
 
-| Sequence Length | Forward Speedup | Training Speedup | Memory Savings |
-|----------------|----------------|-----------------|----------------|
-| 256 | **4.44x** | - | **2x** |
-| 512 | **4.47x** | 1.1x | **2x** |
-| 1024 | **2.70x** | **2.02x** | **4x** |
-| **Combined** | - | **5.45x** | **~75%** |
+## Latest Update
 
-*Full analysis: [docs/analysis_report.md](docs/analysis_report.md)*
+The latest release, [`v1.1.1`](https://github.com/li-guohao/asam-attention/releases/tag/v1.1.1), focuses on:
 
-## 🛠️ Quick Start
+- sparse path optimizations,
+- pattern construction acceleration,
+- hierarchical pattern caching,
+- clustered assignment optimization,
+- profiling support via `benchmarks/profile_patterns.py`.
 
-### Installation
+See:
+
+- [Changelog](CHANGELOG.md)
+- [Performance Optimization Report](docs/performance_optimization_report.md)
+
+## Implementations
+
+### 1. `ASAMLayer`
+
+The main adaptive sparse attention layer with gating and pattern selection.
+
+```python
+from asam import ASAMLayer, ASAMConfig
+
+config = ASAMConfig(
+    dim=256,
+    num_heads=4,
+    pattern_type="local",
+    use_adaptive_gate=True,
+)
+
+layer = ASAMLayer(config)
+```
+
+### 2. `EfficientASAMLayer` / `FlashASAMLayer`
+
+PyTorch 2.x efficient attention variants built on `scaled_dot_product_attention`.
+
+```python
+from asam.efficient_attention import FlashASAMLayer
+
+layer = FlashASAMLayer(dim=256, num_heads=4, window_size=128)
+```
+
+### 3. `OptimizedASAMLayer`
+
+An optimized sparse implementation for local and strided attention.
+
+```python
+from asam.asam_layer_optimized import OptimizedASAMLayer
+
+layer = OptimizedASAMLayer(dim=256, num_heads=4, window_size=128)
+```
+
+## Performance Snapshot
+
+Representative results included in this repository:
+
+| Component | Before | After | Gain |
+|---|---:|---:|---:|
+| `OptimizedASAMLayer` | 32.84 ms | 24.58 ms | `1.34x` |
+| `EfficientASAMLayer` | 12.19 ms | 11.30 ms | `1.08x` |
+| `LocalSparsePattern.build_pattern()` | 28.55 ms | 17.81 ms | `1.60x` |
+| `StridedSparsePattern.build_pattern()` | 82.09 ms | 18.10 ms | `4.54x` |
+| `RandomSparsePattern.build_pattern()` | 540.76 ms | 239.46 ms | `2.26x` |
+| `HierarchicalSparsePattern.combine_patterns()` on CUDA | 43.06 ms | 2.94 ms | `14.65x` |
+
+These numbers come from local measurements in the current development environment and should be treated as reference results, not universal benchmarks.
+
+## Installation
+
+### Clone the repository
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/asam-attention.git
+git clone https://github.com/li-guohao/asam-attention.git
 cd asam-attention
+```
 
-# Create virtual environment (Python 3.8+)
+### Create an environment
+
+```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+```
 
-# Install PyTorch with CUDA
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+- Windows: `.venv\Scripts\activate`
+- macOS / Linux: `source .venv/bin/activate`
 
-# Install ASAM
+### Install dependencies
+
+Install PyTorch first, then install ASAM from source:
+
+```bash
+pip install torch torchvision
 pip install -e .
 ```
 
-### Basic Usage
+For development:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Quick Start
+
+### Basic usage
+
+```python
+import torch
+from asam import ASAMLayer, ASAMConfig
+
+config = ASAMConfig(
+    dim=256,
+    num_heads=4,
+    pattern_type="local",
+    use_adaptive_gate=True,
+)
+
+layer = ASAMLayer(config)
+x = torch.randn(2, 512, 256)
+
+output, info = layer(x, return_info=True)
+print(output.shape)
+print(info["sparse_ratio"])
+```
+
+### Efficient attention usage
 
 ```python
 import torch
 from asam.efficient_attention import FlashASAMLayer
 
-# Create optimized ASAM layer
-layer = FlashASAMLayer(
-    dim=256,           # Model dimension
-    num_heads=4,       # Number of attention heads
-    window_size=128,   # Local attention window
-)
+layer = FlashASAMLayer(dim=256, num_heads=4, window_size=128)
+x = torch.randn(2, 512, 256)
 
-# Forward pass
-x = torch.randn(2, 512, 256)  # [batch, seq_len, dim]
 output, info = layer(x, return_info=True)
-print(f"Output shape: {output.shape}")
-print(f"Sparse ratio: {info['sparse_ratio']:.1%}")
+print(output.shape)
+print(info["sparse_ratio"])
 ```
 
-### Mixed Precision Training
-
-```python
-from torch.cuda.amp import autocast, GradScaler
-
-model = YourModel().cuda()
-scaler = GradScaler()
-
-for x, y in dataloader:
-    optimizer.zero_grad()
-    
-    # Automatic mixed precision
-    with autocast():
-        output = model(x)
-        loss = criterion(output, y)
-    
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
-```
-
-## 📈 Benchmarks
-
-Run the benchmark suite:
+### Example scripts
 
 ```bash
-# Full benchmark (requires GPU)
+python examples/basic_usage.py
+python examples/optimized_usage.py
+python examples/benchmark.py
+```
+
+## Benchmarks and Profiling
+
+### Run benchmark scripts
+
+```bash
 python experiments/run_final_benchmark.py
-
-# Profile sparse pattern build/cache performance
-python benchmarks/profile_patterns.py --seq-len 2048
-
-# Visualize results
-python docs/visualize_analysis.py
+python experiments/benchmark_optimized.py
 ```
 
-## 🏗️ Project Structure
-
-```
-asam-attention/
-├── asam/                      # Core library
-│   ├── __init__.py
-│   ├── asam_layer.py          # Original ASAM implementation
-│   ├── efficient_attention.py # Flash Attention optimized
-│   ├── asam_layer_optimized.py # True sparse attention
-│   ├── adaptive_gate.py       # Adaptive gating mechanism
-│   └── sparse_patterns.py     # Sparse attention patterns
-├── experiments/               # Benchmark scripts
-│   ├── run_final_benchmark.py
-│   ├── benchmark_optimized.py
-│   └── train_mixed_precision.py
-├── tests/                     # Unit tests
-├── examples/                  # Usage examples
-└── docs/                      # Documentation
-```
-
-## 🔬 Optimization Details
-
-### 1. Flash Attention
-- Uses PyTorch 2.0+ `scaled_dot_product_attention`
-- Automatically selects fastest kernel (Flash/Memory-Efficient/Math)
-- Reduces HBM reads from O(N²) to O(N)
-
-### 2. Mixed Precision
-- FP16 forward/backward passes
-- Tensor Cores acceleration on RTX GPUs
-- 50% memory reduction for large sequences
-
-### 3. Adaptive Sparsity
-- Local window attention: O(n×window) complexity
-- Strided global attention for long-range dependencies
-- Dynamic pattern selection based on input characteristics
-
-## 📚 Documentation
-
-- [Changelog](CHANGELOG.md) - Version history and release highlights
-- [Performance Analysis Report](docs/analysis_report.md) - Detailed benchmark analysis
-- [Performance Optimization Report](docs/performance_optimization_report.md) - Implemented optimizations and measured gains
-- [API Documentation](docs/API.md) - Full API reference
-- [Technical Deep Dive](docs/TECHNICAL.md) - Architecture details
-
-## 🧪 Tests
+### Profile sparse patterns
 
 ```bash
-# Run all tests
-python -m pytest tests/
+python benchmarks/profile_patterns.py --seq-len 2048 --devices auto
+```
 
-# Run specific test
+### Export profiling results
+
+```bash
+python benchmarks/profile_patterns.py --seq-len 2048 --devices auto --json-out benchmarks/pattern_profile.json
+```
+
+## Project Structure
+
+```text
+asam-attention/
+├── asam/                         # Core library
+│   ├── asam_layer.py             # Main ASAM implementation
+│   ├── asam_layer_optimized.py   # Optimized sparse attention path
+│   ├── efficient_attention.py    # SDPA / Flash-style attention layers
+│   ├── adaptive_gate.py          # Adaptive gating module
+│   ├── sparse_patterns.py        # Sparse pattern implementations
+│   └── __init__.py
+├── benchmarks/                   # Benchmark and profiling tools
+├── docs/                         # Documentation
+├── examples/                     # Usage examples
+├── experiments/                  # Experiment scripts
+├── tests/                        # Unit tests
+├── CHANGELOG.md
+└── README.md
+```
+
+## Documentation
+
+- [Chinese README](README.zh-CN.md)
+- [Changelog](CHANGELOG.md)
+- [Performance Analysis Report](docs/analysis_report.md)
+- [Performance Optimization Report](docs/performance_optimization_report.md)
+- [API Documentation](docs/API.md)
+- [Technical Deep Dive](docs/TECHNICAL.md)
+- [Experiments Guide](docs/EXPERIMENTS_GUIDE.md)
+
+## Testing
+
+Run the full test suite:
+
+```bash
+python -m pytest tests -q
+```
+
+Run selected tests:
+
+```bash
+python tests/test_basic.py
 python tests/test_efficient.py
+python tests/test_asam.py
 ```
 
-## 🖥️ Hardware Requirements
+## Requirements
 
-- **GPU**: NVIDIA GPU with CUDA support (tested on RTX 3060)
-- **VRAM**: 4GB+ for inference, 8GB+ for training
-- **Python**: 3.8 or higher
-- **PyTorch**: 2.0 or higher (for Flash Attention)
+- Python 3.8+
+- PyTorch 2.0+
+- Optional CUDA GPU for optimized and benchmark paths
 
-## 🤝 Contributing
+## Notes
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+- The repository includes both baseline and optimized implementations.
+- Some optimization claims depend on GPU architecture and sequence length.
+- The profiling scripts are intended to help you evaluate the trade-offs on your own hardware.
 
-## 📝 Citation
+## License
 
-If you use ASAM in your research, please cite:
-
-```bibtex
-@software{asam_attention,
-  title={ASAM: Adaptive Sparse Attention Module},
-  author={Your Name},
-  year={2026},
-  url={https://github.com/yourusername/asam-attention}
-}
-```
-
-## 📄 License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
-
-## 🙏 Acknowledgments
-
-- Flash Attention implementation based on [Dao et al.](https://arxiv.org/abs/2205.14135)
-- PyTorch team for `scaled_dot_product_attention`
-- Inspired by BigBird, Longformer, and other sparse attention works
-
----
-
-**Made with ❤️ for efficient deep learning**
+This project is released under the [MIT License](LICENSE).
