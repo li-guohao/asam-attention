@@ -142,6 +142,7 @@ asam-attention/
 
 ## 📚 Documentation
 
+- [Changelog](CHANGELOG.md) - Version history and release highlights
 - [Performance Analysis Report](docs/analysis_report.md) - Detailed benchmark analysis
 - [Performance Optimization Report](docs/performance_optimization_report.md) - Implemented optimizations and measured gains
 - [API Documentation](docs/API.md) - Full API reference
