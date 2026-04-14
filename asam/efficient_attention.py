@@ -46,6 +46,7 @@ class EfficientASAMLayer(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(dim)
+        self._local_mask_cache = {}
         
         # FFN
         self.ffn = nn.Sequential(
@@ -63,17 +64,27 @@ class EfficientASAMLayer(nn.Module):
         nn.init.xavier_uniform_(self.out_proj.weight)
     
     def _create_local_mask(self, seq_len: int, device: torch.device) -> torch.Tensor:
-        """Create local attention mask for efficient attention."""
+        """Create or reuse a local attention mask for efficient attention."""
+        cache_key = (device.type, device.index, seq_len, self.window_size)
+        cached_mask = self._local_mask_cache.get(cache_key)
+        if cached_mask is not None:
+            return cached_mask
+
         w = self.window_size // 2
-        
-        # Create causal + local mask
+
         i = torch.arange(seq_len, device=device).view(-1, 1)
         j = torch.arange(seq_len, device=device).view(1, -1)
-        
-        # Local window mask
         local_mask = (i - j).abs() <= w
-        
+
+        self._local_mask_cache[cache_key] = local_mask
         return local_mask
+
+    def _estimate_sparse_ratio(self, seq_len: int) -> float:
+        if not self.use_local_attention:
+            return 1.0
+
+        effective_window = min(seq_len, 2 * (self.window_size // 2) + 1)
+        return max(0.0, 1.0 - (effective_window / seq_len))
     
     def forward(
         self,
@@ -150,7 +161,7 @@ class EfficientASAMLayer(nn.Module):
         
         if return_info:
             info = {
-                'sparse_ratio': 1.0 - (self.window_size / seq_len) if self.use_local_attention else 1.0,
+                'sparse_ratio': self._estimate_sparse_ratio(seq_len),
             }
             return out, info
         

@@ -4,10 +4,12 @@ Unit tests for ASAM.
 
 import torch
 import pytest
+import torch.nn.functional as F
 from asam import ASAMLayer, ASAMConfig, AdaptiveGate
 from asam.sparse_patterns import (
     LocalSparsePattern,
     StridedSparsePattern,
+    RandomSparsePattern,
     ClusteredSparsePattern,
     HierarchicalSparsePattern,
 )
@@ -38,6 +40,28 @@ class TestSparsePatterns:
         pattern = StridedSparsePattern(seq_len, stride=32)
         mask = pattern.build_pattern()
         assert mask.shape == (seq_len, seq_len)
+
+        strided_indices = torch.arange(0, seq_len, 32)
+        assert mask[:, strided_indices].all()
+
+    def test_random_pattern_is_deterministic(self):
+        pattern_a = RandomSparsePattern(seq_len=64, num_random=8, num_heads=4, seed=123)
+        pattern_b = RandomSparsePattern(seq_len=64, num_random=8, num_heads=4, seed=123)
+
+        mask_a = pattern_a.build_pattern()
+        mask_b = pattern_b.build_pattern()
+
+        assert torch.equal(mask_a, mask_b)
+
+    def test_random_pattern_does_not_mutate_global_rng(self):
+        torch.manual_seed(999)
+        expected = torch.rand(4)
+
+        torch.manual_seed(999)
+        _ = RandomSparsePattern(seq_len=32, num_random=4, num_heads=2, seed=123).build_pattern()
+        actual = torch.rand(4)
+
+        assert torch.allclose(actual, expected)
     
     def test_clustered_pattern_assignment(self):
         seq_len = 64
@@ -58,6 +82,42 @@ class TestSparsePatterns:
         
         # Check probabilities sum to 1
         assert torch.allclose(q_assign.sum(dim=-1), torch.ones(batch, heads, seq_len), atol=1e-5)
+
+    def test_clustered_pattern_matches_reference_ops(self):
+        seq_len = 16
+        batch = 2
+        heads = 2
+        dim_head = 8
+        num_clusters = 4
+
+        pattern = ClusteredSparsePattern(
+            seq_len,
+            num_clusters=num_clusters,
+            num_heads=heads,
+            dim_head=dim_head,
+        )
+
+        q = torch.randn(batch, heads, seq_len, dim_head)
+        k = torch.randn(batch, heads, seq_len, dim_head)
+
+        q_assign, k_assign = pattern.compute_cluster_assignment(q, k)
+
+        q_norm = F.normalize(q, dim=-1)
+        k_norm = F.normalize(k, dim=-1)
+        centroids_norm = F.normalize(pattern.centroids, dim=-1)
+        temp = pattern.temperature.abs().clamp_min(1e-6)
+        q_ref = F.softmax(torch.einsum('b h s d, h c d -> b h s c', q_norm, centroids_norm) / temp, dim=-1)
+        k_ref = F.softmax(torch.einsum('b h s d, h c d -> b h s c', k_norm, centroids_norm) / temp, dim=-1)
+
+        assert torch.allclose(q_assign, q_ref, atol=1e-6)
+        assert torch.allclose(k_assign, k_ref, atol=1e-6)
+
+        attn_scores = torch.randn(batch, heads, seq_len, seq_len)
+        masked = pattern.apply_cluster_mask(attn_scores, q_assign, k_assign)
+        affinity_ref = torch.einsum('b h q c, b h k c -> b h q k', q_assign, k_assign)
+        masked_ref = attn_scores.masked_fill(~(affinity_ref > 0.1), torch.finfo(attn_scores.dtype).min)
+
+        assert torch.equal(masked, masked_ref)
     
     def test_hierarchical_pattern(self):
         seq_len = 128
@@ -69,6 +129,32 @@ class TestSparsePatterns:
         assert combined.shape[0] == 4  # num_heads
         assert combined.shape[1] == seq_len
         assert combined.shape[2] == seq_len
+
+        cache_key = (device.type, device.index)
+        assert cache_key in pattern._pattern_stack_cache
+
+    def test_hierarchical_pattern_respects_updated_weights(self):
+        seq_len = 64
+        num_heads = 2
+        pattern = HierarchicalSparsePattern(seq_len, scales=[4, 16], num_heads=num_heads)
+        device = torch.device('cpu')
+
+        with torch.no_grad():
+            pattern.scale_weights.fill_(-20.0)
+            pattern.scale_weights[0].fill_(20.0)
+
+        combined = pattern.combine_patterns(device)
+        expected = pattern.patterns[0].get_pattern(device).unsqueeze(0).expand(num_heads, -1, -1)
+
+        assert torch.equal(combined, expected)
+
+    def test_pattern_cache_reuses_cpu_tensor(self):
+        pattern = LocalSparsePattern(seq_len=128, window_size=32)
+
+        mask_a = pattern.get_pattern(torch.device('cpu'))
+        mask_b = pattern.get_pattern(torch.device('cpu'))
+
+        assert mask_a.data_ptr() == mask_b.data_ptr()
 
 
 class TestAdaptiveGate:

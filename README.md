@@ -96,6 +96,9 @@ Run the benchmark suite:
 # Full benchmark (requires GPU)
 python experiments/run_final_benchmark.py
 
+# Profile sparse pattern build/cache performance
+python benchmarks/profile_patterns.py --seq-len 2048
+
 # Visualize results
 python docs/visualize_analysis.py
 ```
@@ -140,6 +143,7 @@ asam-attention/
 ## 📚 Documentation
 
 - [Performance Analysis Report](docs/analysis_report.md) - Detailed benchmark analysis
+- [Performance Optimization Report](docs/performance_optimization_report.md) - Implemented optimizations and measured gains
 - [API Documentation](docs/API.md) - Full API reference
 - [Technical Deep Dive](docs/TECHNICAL.md) - Architecture details
 
