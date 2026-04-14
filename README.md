@@ -42,6 +42,35 @@ See:
 
 ## Implementations
 
+## Architecture Overview
+
+The diagram below shows how the main ASAM components relate to each other inside this repository.
+
+```mermaid
+flowchart TD
+    A["Input Sequence"] --> B["ASAMLayer"]
+    B --> C["AdaptiveGate"]
+    B --> D["Sparse Patterns"]
+    D --> D1["Local"]
+    D --> D2["Strided"]
+    D --> D3["Random"]
+    D --> D4["Clustered"]
+    D --> D5["Hierarchical"]
+    B --> E["Sparse / Dense Attention Mixing"]
+    E --> F["Output Sequence"]
+
+    G["EfficientASAMLayer"] --> H["PyTorch SDPA / Flash-style Kernels"]
+    I["OptimizedASAMLayer"] --> J["True Sparse Local / Strided Path"]
+
+    K["Benchmarks & Profiling"] --> K1["experiments/"]
+    K --> K2["benchmarks/profile_patterns.py"]
+    K --> K3["docs/performance_optimization_report.md"]
+
+    B -.shares sparse logic with.-> D
+    G -.optimized runtime path.-> F
+    I -.optimized sparse runtime path.-> F
+```
+
 ### 1. `ASAMLayer`
 
 The main adaptive sparse attention layer with gating and pattern selection.

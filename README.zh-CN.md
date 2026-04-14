@@ -42,6 +42,35 @@ ASAM 是一个面向长序列建模的研究型注意力模块，将**自适应�
 
 ## 实现说明
 
+## 架构概览
+
+下图展示了仓库中 ASAM 主要模块之间的关系，适合直接在 GitHub 页面查看。
+
+```mermaid
+flowchart TD
+    A["输入序列"] --> B["ASAMLayer"]
+    B --> C["AdaptiveGate"]
+    B --> D["Sparse Patterns"]
+    D --> D1["Local"]
+    D --> D2["Strided"]
+    D --> D3["Random"]
+    D --> D4["Clustered"]
+    D --> D5["Hierarchical"]
+    B --> E["稀疏 / 稠密注意力融合"]
+    E --> F["输出序列"]
+
+    G["EfficientASAMLayer"] --> H["PyTorch SDPA / Flash 风格内核"]
+    I["OptimizedASAMLayer"] --> J["真正稀疏的 Local / Strided 路径"]
+
+    K["Benchmark 与 Profiling"] --> K1["experiments/"]
+    K --> K2["benchmarks/profile_patterns.py"]
+    K --> K3["docs/performance_optimization_report.md"]
+
+    B -.共享稀疏模式逻辑.-> D
+    G -.高效运行时路径.-> F
+    I -.优化稀疏运行时路径.-> F
+```
+
 ### 1. `ASAMLayer`
 
 主实现，包含自适应门控与模式选择。
