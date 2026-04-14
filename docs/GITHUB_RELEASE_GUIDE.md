@@ -69,8 +69,8 @@ git commit -m "Initial commit: ASAM with Flash Attention optimization
 ### 3. 推送到 GitHub
 
 ```bash
-# 添加远程仓库（替换 yourusername）
-git remote add origin https://github.com/yourusername/asam-attention.git
+# 添加远程仓库
+git remote add origin https://github.com/li-guohao/asam-attention.git
 
 # 推送
 git push -u origin main
