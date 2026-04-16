@@ -84,3 +84,8 @@ benchmark_results.json
 *.token
 .env
 .secrets
+# Local benchmark and report artifacts
+experiments/results_3060/*
+!experiments/results_3060/.gitkeep
+docs/performance_analysis.png
+

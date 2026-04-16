@@ -108,9 +108,11 @@ num_steps = 20  # 从 50 减小
 
 ```
 experiments/results_3060/
-├── results_20260201_123045.json   # 详细数据
-└── plots_20260201_123045.png      # 可视化图表
+?   ??? results_20260201_123045.json   # ?????????
+?   ??? plots_20260201_123045.png      # ??????????
 ```
+
+> Note: files under `experiments/results_3060/` are generated locally and are not tracked by Git.
 
 ### 关键指标解读
 
@@ -158,7 +160,7 @@ experiments/results_3060/
 
 如果实验遇到问题：
 
-1. **查看日志**: `experiments/results_3060/results_*.json`
+1. **??????**: `experiments/results_3060/results_*.json`
 2. **检查GPU**: `nvidia-smi`
 3. **清理显存**: `python -c "import torch; torch.cuda.empty_cache()"`
 

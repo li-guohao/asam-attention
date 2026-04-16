@@ -18,7 +18,7 @@ asam-attention-main/
 │   ├── run_final_benchmark.py     # 完整基准测试
 │   ├── benchmark_optimized.py
 │   ├── train_mixed_precision.py
-│   └── results_3060/              # 实验结果
+│   └── results_3060/              # ???????????
 ├── tests/                         # 单元测试
 │   ├── test_basic.py
 │   └── test_efficient.py
@@ -27,7 +27,6 @@ asam-attention-main/
 │   └── optimized_usage.py         # Flash Attention + FP16
 ├── docs/                          # 文档
 │   ├── analysis_report.md         # 详细分析报告
-│   └── performance_analysis.png   # 性能图表
 ├── README.md                      # 重写的 README
 ├── setup.py
 ├── requirements.txt

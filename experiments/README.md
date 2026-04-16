@@ -81,9 +81,11 @@ max_seq_len=2048     # 超过会 OOM
 
 ```
 experiments/results_3060/
-├── results_YYYYMMDD_HHMMSS.json   # 详细数据
-└── plots_YYYYMMDD_HHMMSS.png      # 可视化图表
+?   ??? results_YYYYMMDD_HHMMSS.json   # ?????????
+?   ??? plots_YYYYMMDD_HHMMSS.png      # ??????????
 ```
+
+> Note: this directory is reserved for local benchmark outputs and stays untracked in Git.
 
 ### 关键指标
 
