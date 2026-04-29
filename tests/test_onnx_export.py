@@ -5,6 +5,24 @@ import os
 import pytest
 
 
+def _onnx_available():
+    """Check if torch.onnx.export is functional (requires onnxscript on PyTorch 2.7+)."""
+    try:
+        import torch.onnx
+        # Verify the internal exporter can be imported
+        from torch.onnx._internal.exporter import _compat
+        return True
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+onnx_skip = pytest.mark.skipif(
+    not _onnx_available(),
+    reason="torch.onnx.export not available (install onnxscript for PyTorch 2.7+)",
+)
+
+
+@onnx_skip
 def test_export_to_onnx_creates_file():
     """export_to_onnx creates a valid .onnx file."""
     from asam import ASAMConfig, ASAMLayer
@@ -25,6 +43,7 @@ def test_export_to_onnx_creates_file():
         assert os.path.getsize(onnx_path) > 1000
 
 
+@onnx_skip
 def test_export_to_onnx_with_dynamic_batch():
     """export_to_onnx works with dynamic batch size."""
     from asam import ASAMConfig, ASAMLayer
@@ -50,6 +69,7 @@ def test_export_to_onnx_with_dynamic_batch():
         assert os.path.getsize(onnx_path) > 1000
 
 
+@onnx_skip
 def test_export_to_onnx_return_path():
     """export_to_onnx returns the output path."""
     from asam import ASAMConfig, ASAMLayer

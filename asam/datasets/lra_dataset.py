@@ -178,7 +178,7 @@ class LRADataset(Dataset):
             doc2 = self._generate_doc_tokens(rng, self.seq_len)
 
             # Label: 1 if docs share enough tokens, 0 otherwise
-            overlap = len(set(doc1[:100].tolist()) & set(doc2[:100].tolist()))
+            overlap = len(set(doc1[:100]) & set(doc2[:100]))
             label = 1 if overlap > 20 else 0
 
             data.append((

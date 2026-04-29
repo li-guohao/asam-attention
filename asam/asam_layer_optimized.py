@@ -194,7 +194,7 @@ class OptimizedASAMLayer(nn.Module):
 
         combined_mask = valid_mask.view(1, 1, seq_len, context_size)
         if mask is not None:
-            normalized_mask = normalize_attention_mask(mask, batch, heads, seq_len)
+            normalized_mask = normalize_attention_mask(mask, batch, self.num_heads, seq_len)
             gather_index = positions.view(1, 1, seq_len, context_size).expand(batch, heads, -1, -1)
             gathered_mask = normalized_mask.gather(-1, gather_index)
             combined_mask = combined_mask & gathered_mask
@@ -373,7 +373,7 @@ class OptimizedASAMLayer(nn.Module):
         # Select attention type based on pattern_type and gate
         normalized_mask = None
         if mask is not None:
-            normalized_mask = normalize_attention_mask(mask, batch, heads, seq_len)
+            normalized_mask = normalize_attention_mask(mask, batch, self.num_heads, seq_len)
 
         if self.pattern_type == 'local':
             attn_out = self._compute_local_attention(q, k, v, self.window_size, mask=normalized_mask)
