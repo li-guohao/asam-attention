@@ -5,14 +5,20 @@ Optimized ASAM Layer
 This is an optimized version of ASAM that achieves true sparse computation.
 """
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import math
 
 from .adaptive_gate import AdaptiveGate
 from .sparse_patterns import SparsePattern, LocalSparsePattern, HierarchicalSparsePattern
+from ._common import (
+    normalize_attention_mask,
+    gather_values_by_positions,
+)
 
 
 class OptimizedASAMLayer(nn.Module):
@@ -30,18 +36,22 @@ class OptimizedASAMLayer(nn.Module):
         dim: int,
         num_heads: int = 8,
         window_size: int = 128,
+        stride: int = 32,
         dropout: float = 0.1,
         use_adaptive_gate: bool = True,
         pattern_type: str = 'local',
-    ):
+    ) -> None:
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
         self.window_size = window_size
+        self.stride = stride
         self.head_dim = dim // num_heads
         self.pattern_type = pattern_type
         self._local_window_mask_cache = {}
+        self._local_window_index_cache = {}
         self._local_attention_mask_cache = {}
+        self._strided_attention_index_cache = {}
 
         assert dim % num_heads == 0, "dim must be divisible by num_heads"
         
@@ -84,6 +94,7 @@ class OptimizedASAMLayer(nn.Module):
         k: torch.Tensor,
         v: torch.Tensor,
         window_size: int,
+        mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         True O(n*window) local attention.
@@ -94,6 +105,18 @@ class OptimizedASAMLayer(nn.Module):
             output: [batch, heads, seq, dim]
         """
         _, _, seq_len, dim_head = q.shape
+
+        if mask is not None:
+            window_positions, valid_window_mask = self._get_local_window_indices(seq_len, window_size, q.device)
+            return self._compute_indexed_sparse_attention(
+                q,
+                k,
+                v,
+                window_positions,
+                valid_window_mask,
+                mask=mask,
+            )
+
         w = window_size // 2
         
         # Use unfold for efficient window extraction
@@ -111,7 +134,7 @@ class OptimizedASAMLayer(nn.Module):
         scores = scores.squeeze(-2)  # [batch, heads, seq, window]
 
         valid_window_mask = self._get_local_window_mask(seq_len, window_size, q.device)
-        scores = scores.masked_fill(~valid_window_mask, torch.finfo(scores.dtype).min)
+        scores = scores.masked_fill(~valid_window_mask, float('-inf'))
         
         # Softmax and apply
         attn = F.softmax(scores, dim=-1)
@@ -130,28 +153,114 @@ class OptimizedASAMLayer(nn.Module):
         v: torch.Tensor,
         stride: int = 32,
         local_window: int = 16,
+        mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Strided attention: local window + strided global tokens.
+        Exact strided attention over the union of local and global strided tokens.
         """
+        seq_len = q.size(-2)
+        combined_positions, combined_valid_mask = self._get_strided_attention_indices(
+            seq_len,
+            stride,
+            local_window,
+            q.device,
+        )
+        return self._compute_indexed_sparse_attention(
+            q,
+            k,
+            v,
+            combined_positions,
+            combined_valid_mask,
+            mask=mask,
+        )
+
+    def _compute_indexed_sparse_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        positions: torch.Tensor,
+        valid_mask: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         batch, heads, seq_len, dim_head = q.shape
-        
-        # Local attention
-        local_out = self._compute_local_attention(q, k, v, local_window * 2)
-        
-        # Strided global attention
-        strided_indices = torch.arange(0, seq_len, stride, device=q.device)
-        k_strided = k[..., strided_indices, :]
-        v_strided = v[..., strided_indices, :]
-        
-        # Global scores
-        global_scores = torch.matmul(q, k_strided.transpose(-2, -1)) / math.sqrt(dim_head)
-        global_attn = F.softmax(global_scores, dim=-1)
-        global_attn = self.dropout(global_attn)
-        global_out = torch.matmul(global_attn, v_strided)
-        
-        # Combine (simple averaging)
-        return (local_out + global_out) / 2
+        context_size = positions.size(-1)
+
+        gathered_k = gather_values_by_positions(k, positions)
+        gathered_v = gather_values_by_positions(v, positions)
+
+        scores = torch.matmul(q.unsqueeze(-2), gathered_k.transpose(-2, -1)).squeeze(-2)
+        scores = scores / math.sqrt(dim_head)
+
+        combined_mask = valid_mask.view(1, 1, seq_len, context_size)
+        if mask is not None:
+            normalized_mask = normalize_attention_mask(mask, batch, heads, seq_len)
+            gather_index = positions.view(1, 1, seq_len, context_size).expand(batch, heads, -1, -1)
+            gathered_mask = normalized_mask.gather(-1, gather_index)
+            combined_mask = combined_mask & gathered_mask
+
+        scores = scores.masked_fill(~combined_mask, float('-inf'))
+        attn = F.softmax(scores, dim=-1)
+        attn = torch.nan_to_num(attn, nan=0.0)
+        attn = self.dropout(attn)
+
+        return torch.matmul(attn.unsqueeze(-2), gathered_v).squeeze(-2)
+
+
+    def _get_strided_local_window(self) -> int:
+        return max(1, min(self.window_size // 2, self.stride // 2))
+
+    def _get_strided_attention_indices(
+        self,
+        seq_len: int,
+        stride: int,
+        local_window: int,
+        device: torch.device,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        cache_key = (device.type, device.index, seq_len, stride, local_window)
+        cached_value = self._strided_attention_index_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
+        local_positions, local_valid_mask = self._get_local_window_indices(seq_len, local_window * 2, device)
+        strided_positions = torch.arange(0, seq_len, stride, device=device)
+        query_positions = torch.arange(seq_len, device=device)
+        strided_duplicates = (query_positions.unsqueeze(-1) - strided_positions.view(1, -1)).abs() <= local_window
+
+        combined_positions = torch.cat(
+            [local_positions, strided_positions.view(1, -1).expand(seq_len, -1)],
+            dim=-1,
+        )
+        combined_valid_mask = torch.cat(
+            [local_valid_mask, ~strided_duplicates],
+            dim=-1,
+        )
+
+        cached_value = (combined_positions, combined_valid_mask)
+        self._strided_attention_index_cache[cache_key] = cached_value
+        return cached_value
+
+    def _get_local_window_indices(
+        self,
+        seq_len: int,
+        window_size: int,
+        device: torch.device,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        cache_key = (device.type, device.index, seq_len, window_size)
+        cached_value = self._local_window_index_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
+        w = window_size // 2
+        positions = torch.arange(seq_len, device=device)
+        offsets = torch.arange(-w, w + 1, device=device)
+        window_positions = positions.unsqueeze(-1) + offsets.unsqueeze(0)
+        valid_mask = (window_positions >= 0) & (window_positions < seq_len)
+        clamped_positions = window_positions.clamp(0, seq_len - 1)
+
+        cached_value = (clamped_positions, valid_mask)
+        self._local_window_index_cache[cache_key] = cached_value
+        return cached_value
 
     def _get_local_window_mask(
         self,
@@ -164,14 +273,25 @@ class OptimizedASAMLayer(nn.Module):
         if cached_mask is not None:
             return cached_mask
 
-        w = window_size // 2
-        positions = torch.arange(seq_len, device=device)
-        offsets = torch.arange(-w, w + 1, device=device)
-        window_positions = positions.unsqueeze(-1) + offsets.unsqueeze(0)
-        mask = ((window_positions >= 0) & (window_positions < seq_len)).unsqueeze(0).unsqueeze(0)
+        _, valid_mask = self._get_local_window_indices(seq_len, window_size, device)
+        mask = valid_mask.unsqueeze(0).unsqueeze(0)
 
         self._local_window_mask_cache[cache_key] = mask
         return mask
+
+    def _estimate_sparse_ratio(self, seq_len: int, device: torch.device) -> float:
+        if self.pattern_type == 'strided':
+            _, valid_mask = self._get_strided_attention_indices(
+                seq_len,
+                self.stride,
+                self._get_strided_local_window(),
+                device,
+            )
+        else:
+            _, valid_mask = self._get_local_window_indices(seq_len, self.window_size, device)
+
+        average_connections = valid_mask.sum(dim=-1).float().mean().item()
+        return max(0.0, 1.0 - (average_connections / max(1, seq_len)))
 
     def _get_dense_local_mask(self, seq_len: int, device: torch.device) -> torch.Tensor:
         cache_key = (device.type, device.index, seq_len, self.window_size)
@@ -215,7 +335,7 @@ class OptimizedASAMLayer(nn.Module):
         x: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
         return_info: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[dict]]:
+    ) -> Tuple[torch.Tensor, Optional[Dict[str, float]]]:
         """
         Forward pass with optimized sparse attention.
         
@@ -251,17 +371,23 @@ class OptimizedASAMLayer(nn.Module):
                 pattern_logits = x.new_zeros((batch, 4))
         
         # Select attention type based on pattern_type and gate
+        normalized_mask = None
         if mask is not None:
-            if self.pattern_type == 'local':
-                attn_mask = self._get_dense_local_mask(seq_len, x.device)
-                attn_mask = attn_mask & mask
-            else:
-                attn_mask = mask
-            attn_out = self._fallback_attention_with_mask(q, k, v, attn_mask)
-        elif self.pattern_type == 'local':
-            attn_out = self._compute_local_attention(q, k, v, self.window_size)
+            normalized_mask = normalize_attention_mask(mask, batch, heads, seq_len)
+
+        if self.pattern_type == 'local':
+            attn_out = self._compute_local_attention(q, k, v, self.window_size, mask=normalized_mask)
         elif self.pattern_type == 'strided':
-            attn_out = self._compute_strided_attention(q, k, v)
+            attn_out = self._compute_strided_attention(
+                q,
+                k,
+                v,
+                stride=self.stride,
+                local_window=self._get_strided_local_window(),
+                mask=normalized_mask,
+            )
+        elif normalized_mask is not None:
+            attn_out = self._fallback_attention_with_mask(q, k, v, normalized_mask)
         else:
             # Fallback to local for hierarchical
             attn_out = self._compute_local_attention(q, k, v, self.window_size)
@@ -283,7 +409,7 @@ class OptimizedASAMLayer(nn.Module):
                 'gate_values': gate_value,
                 'confidence': confidence,
                 'pattern_logits': pattern_logits,
-                'sparse_ratio': 1.0 - (self.window_size / seq_len) if seq_len > self.window_size else 0.5,
+                'sparse_ratio': self._estimate_sparse_ratio(seq_len, x.device),
             }
             return out, info
         

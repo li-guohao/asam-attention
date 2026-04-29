@@ -224,6 +224,40 @@ python benchmarks/profile_patterns.py --seq-len 2048 --devices auto
 python benchmarks/profile_patterns.py --seq-len 2048 --devices auto --json-out benchmarks/pattern_profile.json
 ```
 
+## 论文复现实验
+
+如果你想复现持续学习扩展与论文风格实验流程，可以直接使用下面这些脚本。
+
+### 运行真实文本持续学习基准
+
+```bash
+python experiments/run_continual_text_benchmark.py --dataset-name split_ag_news --routing-mode prototype --output-json experiments/continual_benchmark.json
+```
+
+该脚本会导出原始 JSON 指标、诊断图，以及包含理论诊断与自适应轨迹的 Markdown 报告。
+
+### 运行多随机种子消融实验
+
+```bash
+python experiments/run_continual_text_ablation.py --output-json experiments/continual_ablation.json --num-seeds 2
+```
+
+该实验会比较 `task_routing`、`no_adaptation`、`correlation` 与 `meta_secant`，并导出聚合后的 JSON / CSV / PNG / Markdown 结果。
+
+### 一键运行论文实验套件
+
+```bash
+python scripts/run_continual_paper_suite.py --output-dir experiments/paper_suite
+```
+
+Windows PowerShell 下可使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_paper_continual_suite.ps1 --output-dir experiments/paper_suite
+```
+
+该流程会顺序运行基准实验与多种子消融，并输出最终的 suite manifest 和可直接用于论文整理的总结报告。
+
 ## 项目结构
 
 ```text
@@ -250,6 +284,7 @@ asam-attention/
 - [版本记录](CHANGELOG.md)
 - [性能分析报告](docs/analysis_report.md)
 - [性能优化报告](docs/performance_optimization_report.md)
+- [Continual ASAM 指南](docs/CONTINUAL_ASAM.md)
 - [API 文档](docs/API.md)
 - [技术文档](docs/TECHNICAL.md)
 - [实验指南](docs/EXPERIMENTS_GUIDE.md)

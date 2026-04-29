@@ -6,6 +6,8 @@ This module implements various sparse attention patterns that reduce
 the O(n²) complexity of standard attention to O(n log n) or O(n).
 """
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -220,9 +222,9 @@ class HierarchicalSparsePattern(SparsePattern):
     def __init__(
         self,
         seq_len: int,
-        scales: List[int] = None,
-        num_heads: int = 8
-    ):
+        scales: Optional[List[int]] = None,
+        num_heads: int = 8,
+    ) -> None:
         self.scales = scales or [4, 16, 64]
         self.num_heads = num_heads
         super().__init__(seq_len)

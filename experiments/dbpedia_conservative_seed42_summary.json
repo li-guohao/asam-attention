@@ -1,0 +1,80 @@
+[
+  {
+    "name": "no_adaptation",
+    "avg_accuracy": 0.5571428571428572,
+    "avg_forgetting": 0.016666666666666646,
+    "backward_transfer": 0.01666666666666668,
+    "final_stage_forgetting": 0.033333333333333326,
+    "final_transport_gap": 0.02815782092511654,
+    "final_weighted_transport_loss": 0.004147172051792343,
+    "final_task_transport_weights": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05
+    ],
+    "last_signals": {}
+  },
+  {
+    "name": "dual_transport",
+    "avg_accuracy": 0.5285714285714286,
+    "avg_forgetting": 0.04999999999999999,
+    "backward_transfer": -0.016666666666666663,
+    "final_stage_forgetting": 0.04999999999999999,
+    "final_transport_gap": 0.027479728683829308,
+    "final_weighted_transport_loss": 0.004453521377096574,
+    "final_task_transport_weights": [
+      0.053373233849416876,
+      0.0593687853564627,
+      0.057374485360979104,
+      0.05289643731808602,
+      0.05289643731808602,
+      0.054574750948018044,
+      0.05508068835850813
+    ],
+    "last_signals": {
+      "forgetting": 0.019999999999999997,
+      "forgetting_gap": -0.030000000000000006,
+      "forgetting_delta": -0.054999999999999986,
+      "routing_stability": 0.7590165436267853,
+      "transport_gap": 0.03022763505578041,
+      "transport_gap_delta": -0.0020972900092601776,
+      "transport_loss": 0.09099990377823512,
+      "mean_abs_excess": 0.030227631263967072,
+      "routing_entropy": 0.6899098376433055,
+      "routing_sharpness": 0.5917475463629279,
+      "routing_correlation": 0.19539169086997452,
+      "transport_correlation": 0.47474742662179953,
+      "excess_correlation": 0.4747477776535963,
+      "controller_transport_signal": 0.014044719065229095,
+      "controller_topk_signal": 0.0,
+      "task_transport_signals": [
+        0.0,
+        0.08426831439137457,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "task_gap_signals": [
+        0.07654155045747757,
+        0.07654155790805817,
+        0.07654155045747757,
+        0.07053225487470627,
+        0.07654155045747757,
+        0.07654154300689697
+      ],
+      "task_loss_signals": [
+        0.0844255194067955,
+        0.06053169965744019,
+        0.07531557381153106,
+        0.08171252310276031,
+        0.061342014372348784,
+        0.09015396535396576
+      ]
+    }
+  }
+]

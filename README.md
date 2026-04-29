@@ -224,6 +224,40 @@ python benchmarks/profile_patterns.py --seq-len 2048 --devices auto
 python benchmarks/profile_patterns.py --seq-len 2048 --devices auto --json-out benchmarks/pattern_profile.json
 ```
 
+## Paper Reproduction
+
+For the continual-learning extension and paper-style experiment pipeline, use the scripts below.
+
+### Run the real continual benchmark
+
+```bash
+python experiments/run_continual_text_benchmark.py --dataset-name split_ag_news --routing-mode prototype --output-json experiments/continual_benchmark.json
+```
+
+This exports raw JSON metrics, plots, and a Markdown report with theory diagnostics and adaptation traces.
+
+### Run the multi-seed ablation suite
+
+```bash
+python experiments/run_continual_text_ablation.py --output-json experiments/continual_ablation.json --num-seeds 2
+```
+
+This compares `task_routing`, `no_adaptation`, `correlation`, and `meta_secant`, and exports aggregated JSON / CSV / PNG / Markdown artifacts.
+
+### Run the one-command paper suite
+
+```bash
+python scripts/run_continual_paper_suite.py --output-dir experiments/paper_suite
+```
+
+On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_paper_continual_suite.ps1 --output-dir experiments/paper_suite
+```
+
+This pipeline runs the benchmark, runs the multi-seed ablation, and writes a final suite manifest plus paper-ready summary report.
+
 ## Project Structure
 
 ```text
@@ -250,6 +284,7 @@ asam-attention/
 - [Changelog](CHANGELOG.md)
 - [Performance Analysis Report](docs/analysis_report.md)
 - [Performance Optimization Report](docs/performance_optimization_report.md)
+- [Continual ASAM Guide](docs/CONTINUAL_ASAM.md)
 - [API Documentation](docs/API.md)
 - [Technical Deep Dive](docs/TECHNICAL.md)
 - [Experiments Guide](docs/EXPERIMENTS_GUIDE.md)

@@ -2,16 +2,16 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
 
     steps:
     - uses: actions/checkout@v3
@@ -68,15 +68,15 @@ jobs:
     
     - name: Check formatting with black
       run: |
-        black --check asam/ || true
+        black --check asam/
     
     - name: Check imports with isort
       run: |
-        isort --check-only asam/ || true
+        isort --check-only asam/
 
   benchmark:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     
     steps:
     - uses: actions/checkout@v3
@@ -93,7 +93,7 @@ jobs:
     
     - name: Run quick benchmark
       run: |
-        python benchmarks/sota_comparison.py --quick
+        python benchmarks/sota_comparison.py
     
     - name: Upload benchmark results
       uses: actions/upload-artifact@v3

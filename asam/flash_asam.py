@@ -10,16 +10,18 @@ This provides the best of both worlds:
 Requirements: pip install flash-attn
 """
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import math
 
 from .asam_layer import ASAMConfig
 
 
-class FlashASAMLayer(nn.Module):
+class FlashAttnASAMLayer(nn.Module):
     """
     ASAM layer with Flash Attention backend for the dense path.
     
@@ -42,7 +44,41 @@ class FlashASAMLayer(nn.Module):
             self.use_flash = False
         
         # Rest of initialization same as ASAMLayer
-        # ... (simplified for brevity)
+        inner_dim = config.dim_head * config.num_heads
+
+        # Q, K, V projections
+        self.to_qkv = nn.Linear(config.dim, inner_dim * 3, bias=False)
+
+        # Output projection
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, config.dim),
+            nn.Dropout(config.dropout),
+        )
+
+        # Layer normalization (pre-norm)
+        self.norm = nn.LayerNorm(config.dim)
+
+        # Feed-forward network
+        self.ffn = nn.Sequential(
+            nn.Linear(config.dim, config.dim * 4),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.dim * 4, config.dim),
+            nn.Dropout(config.dropout),
+        )
+        self.ffn_norm = nn.LayerNorm(config.dim)
+
+        # Adaptive attention mechanism
+        if config.use_adaptive_gate:
+            from .adaptive_gate import DynamicSparseDenseAttention
+            self.adaptive_attn = DynamicSparseDenseAttention(
+                dim=config.dim,
+                num_heads=config.num_heads,
+                dim_head=config.dim_head,
+                dropout=config.dropout,
+            )
+        else:
+            self.adaptive_attn = None
     
     def flash_attention_forward(
         self,
@@ -137,8 +173,8 @@ class HybridASAM(nn.Module):
         self,
         config: ASAMConfig,
         local_window_size: int = 512,
-        use_flash_local: bool = True
-    ):
+        use_flash_local: bool = True,
+    ) -> None:
         super().__init__()
         self.config = config
         self.local_window_size = local_window_size
@@ -156,7 +192,7 @@ class HybridASAM(nn.Module):
         except ImportError:
             self.has_flash = False
     
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass with local Flash Attention + sparse global attention.
         """

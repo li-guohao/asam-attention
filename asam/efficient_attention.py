@@ -5,23 +5,25 @@ Efficient Attention Implementations
 Uses PyTorch 2.0+ scaled_dot_product_attention with memory-efficient attention.
 """
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Optional
+from typing import Optional, Dict, Tuple
 
 
 class EfficientASAMLayer(nn.Module):
     """
     ASAM Layer using PyTorch 2.0 efficient attention kernels.
-    
+
     Features:
     - Uses torch.nn.functional.scaled_dot_product_attention
     - Supports local attention via block-sparse mask
     - Memory efficient (flash attention on RTX 3060)
     """
-    
+
     def __init__(
         self,
         dim: int,
@@ -29,7 +31,7 @@ class EfficientASAMLayer(nn.Module):
         window_size: int = 128,
         dropout: float = 0.1,
         use_local_attention: bool = True,
-    ):
+    ) -> None:
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -91,7 +93,7 @@ class EfficientASAMLayer(nn.Module):
         x: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
         return_info: bool = False,
-    ):
+    ) -> Tuple[torch.Tensor, Optional[Dict[str, float]]]:
         """
         Forward using PyTorch efficient attention.
         
@@ -174,11 +176,16 @@ class FlashASAMLayer(EfficientASAMLayer):
     Best for RTX 3060.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         # Force use_local_attention=False to allow flash attention
         kwargs['use_local_attention'] = False
         super().__init__(*args, **kwargs)
-    
-    def forward(self, x, mask=None, return_info=False):
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        return_info: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[Dict[str, float]]]:
         # Always use efficient attention (flash when available)
         return super().forward(x, mask, return_info)

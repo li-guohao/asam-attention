@@ -19,6 +19,12 @@ from .sparse_patterns import (
     HierarchicalSparsePattern
 )
 from .adaptive_gate import DynamicSparseDenseAttention
+from ._common import (
+    normalize_attention_mask,
+    gather_values_by_positions,
+    expand_pattern_mask,
+    pattern_mask_to_indices,
+)
 
 
 @dataclass
@@ -111,6 +117,7 @@ class ASAMLayer(nn.Module):
         # Sparse patterns (initialized lazily)
         self._sparse_patterns = {}
         self._pattern_modules = nn.ModuleDict()
+        self._pattern_index_cache = {}
         
     def _get_pattern(self, seq_len: int, device: torch.device):
         """Get or create sparse pattern for given sequence length."""
@@ -161,44 +168,93 @@ class ASAMLayer(nn.Module):
         """
         batch, heads, seq_len, dim_head = q.shape
         device = q.device
-        
+
+        normalized_mask = None
+        if mask is not None:
+            normalized_mask = normalize_attention_mask(mask, batch, heads, seq_len)
+
+        if not isinstance(pattern, ClusteredSparsePattern):
+            positions, valid_mask = self._get_pattern_indices(pattern, seq_len, device)
+            return self._compute_sparse_attention_from_indices(
+                q,
+                k,
+                v,
+                positions,
+                valid_mask,
+                mask=normalized_mask,
+            )
+
         # Get attention scores
         attn_scores = torch.matmul(q, k.transpose(-2, -1))  # [batch, heads, seq, seq]
-        
+
         # Apply sparse pattern mask
         if isinstance(pattern, ClusteredSparsePattern):
             # Dynamic cluster-based masking
             q_assign, k_assign = pattern.compute_cluster_assignment(q, k)
             attn_scores = pattern.apply_cluster_mask(attn_scores, q_assign, k_assign)
-        elif isinstance(pattern, HierarchicalSparsePattern):
-            # Hierarchical pattern
-            pattern_mask = pattern.combine_patterns(device)
-            if pattern_mask.dim() == 3:
-                pattern_mask = pattern_mask.unsqueeze(0).expand(batch, -1, -1, -1)
-            else:
-                pattern_mask = pattern_mask.unsqueeze(0).unsqueeze(0).expand(batch, heads, -1, -1)
-            attn_scores = attn_scores.masked_fill(~pattern_mask, float('-inf'))
-        else:
-            # Static pattern
-            pattern_mask = pattern.get_pattern(device)
-            if pattern_mask.dim() == 2:
-                pattern_mask = pattern_mask.unsqueeze(0).unsqueeze(0)
-            elif pattern_mask.dim() == 3:
-                pattern_mask = pattern_mask.unsqueeze(0)
-            attn_scores = attn_scores.masked_fill(~pattern_mask, float('-inf'))
-        
+
         # Apply additional mask if provided
-        if mask is not None:
-            attn_scores = attn_scores.masked_fill(~mask, float('-inf'))
-        
+        if normalized_mask is not None:
+            attn_scores = attn_scores.masked_fill(~normalized_mask, float('-inf'))
+
         # Softmax and apply to values
         attn_weights = F.softmax(attn_scores, dim=-1)
         attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
-        
+
         out = torch.matmul(attn_weights, v)  # [batch, heads, seq, dim_head]
-        
+
         return out
-    
+
+    def _compute_sparse_attention_from_indices(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        positions: torch.Tensor,
+        valid_mask: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        batch, heads, seq_len, dim_head = q.shape
+        context_size = positions.size(-1)
+
+        gathered_k = gather_values_by_positions(k, positions)
+        gathered_v = gather_values_by_positions(v, positions)
+
+        scores = torch.matmul(q.unsqueeze(-2), gathered_k.transpose(-2, -1)).squeeze(-2)
+
+        combined_mask = valid_mask.unsqueeze(0)
+        if mask is not None:
+            gather_index = positions.unsqueeze(0).expand(batch, -1, -1, -1)
+            gathered_mask = mask.gather(-1, gather_index)
+            combined_mask = combined_mask & gathered_mask
+
+        scores = scores.masked_fill(~combined_mask, float('-inf'))
+        attn_weights = F.softmax(scores, dim=-1)
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
+
+        return torch.matmul(attn_weights.unsqueeze(-2), gathered_v).squeeze(-2)
+
+    def _get_pattern_indices(
+        self,
+        pattern,
+        seq_len: int,
+        device: torch.device,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if isinstance(pattern, HierarchicalSparsePattern):
+            pattern_mask = pattern.combine_patterns(device)
+            pattern_mask = expand_pattern_mask(pattern_mask, self.num_heads)
+            return pattern_mask_to_indices(pattern_mask)
+
+        cache_key = (self.config.pattern_type, seq_len, device.type, device.index)
+        cached_value = self._pattern_index_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
+        pattern_mask = expand_pattern_mask(pattern.get_pattern(device), self.num_heads)
+        cached_value = pattern_mask_to_indices(pattern_mask)
+        self._pattern_index_cache[cache_key] = cached_value
+        return cached_value
+
     def forward(
         self, 
         x: torch.Tensor, 

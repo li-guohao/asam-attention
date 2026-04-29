@@ -6,10 +6,12 @@ An original contribution: dynamic selection between sparse and dense attention
 based on input characteristics and learned confidence estimation.
 """
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple
+from typing import Tuple, Optional, Dict
 
 
 class AdaptiveGate(nn.Module):
@@ -30,7 +32,7 @@ class AdaptiveGate(nn.Module):
         hidden_dim: int = 128,
         num_pools: int = 4,
         temperature: float = 1.0
-    ):
+    ) -> None:
         """
         Args:
             dim: Model dimension
@@ -189,7 +191,7 @@ class DynamicSparseDenseAttention(nn.Module):
         num_heads: int = 8,
         dim_head: int = 64,
         dropout: float = 0.0,
-    ):
+    ) -> None:
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -209,11 +211,11 @@ class DynamicSparseDenseAttention(nn.Module):
         self.gate = AdaptiveGate(dim, num_heads)
         
     def forward(
-        self, 
-        x: torch.Tensor, 
+        self,
+        x: torch.Tensor,
         sparse_attn_fn=None,
-        mask: torch.Tensor = None
-    ) -> Tuple[torch.Tensor, dict]:
+        mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Forward pass with adaptive sparse/dense attention.
         

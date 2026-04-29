@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asam-attention"
+version = "1.2.0"
+description = "Adaptive Sparse Attention Mechanism for long-sequence modeling"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [{name = "Guohao Li", email = "liguohao@gmail.com"}]
+keywords = ["attention", "sparse-attention", "transformer", "deep-learning", "pytorch"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.5.0", "seaborn>=0.12.0"]
+dev = ["pytest>=7.0", "black>=22.0", "flake8>=4.0", "mypy>=1.0", "isort>=5.0"]
+hf = ["transformers>=4.30", "datasets>=2.14", "huggingface_hub>=0.16"]
+export = ["onnx>=1.14", "onnxruntime>=1.15"]
+all = ["asam-attention[viz,dev,hf,export]"]
+
+[project.urls]
+Homepage = "https://github.com/li-guohao/asam-attention"
+Documentation = "https://github.com/li-guohao/asam-attention#readme"
+Repository = "https://github.com/li-guohao/asam-attention"
+Issues = "https://github.com/li-guohao/asam-attention/issues"
+
+[tool.setuptools.packages.find]
+include = ["asam*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

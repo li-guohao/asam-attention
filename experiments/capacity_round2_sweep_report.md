@@ -1,0 +1,30 @@
+# Continual Capacity Sweep
+
+- Dataset: `split_ag_news`
+- Slots/task grid: `2,4`
+- Prototype top-k grid: `1,2`
+- Adaptive hyperparameters: `False`
+- Adaptation strategy: `meta_secant`
+- Seeds per config: `3`
+
+- Best prototype avg accuracy: `slots2_topk2 (0.5286)`
+- Best prototype avg forgetting: `slots2_topk1 (-0.0573)`
+- Task baseline avg accuracy: `0.5234`
+- Task baseline avg forgetting: `-0.0469`
+
+## Aggregated Table
+
+| Config | Mode | Slots/Task | Proto Top-k | Resolved Protos | Accuracy (mean +/- std) | Forgetting (mean +/- std) | BWT (mean +/- std) | Gap (mean +/- std) | Acc Gain vs Task | Forgetting Gain vs Task | Runs |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| task_routing | task | - | - | 2 | 0.5234 +/- 0.0447 | -0.0469 +/- 0.0776 | 0.0469 +/- 0.0776 | 0.0000 +/- 0.0000 | +0.0000 | +0.0000 | 3 |
+| slots2_topk1 | prototype | 2 | 1 | 4 | 0.5130 +/- 0.0461 | -0.0573 +/- 0.0940 | 0.0573 +/- 0.0940 | 0.1051 +/- 0.0063 | -0.0104 | +0.0104 | 3 |
+| slots2_topk2 | prototype | 2 | 2 | 4 | 0.5286 +/- 0.0415 | -0.0417 +/- 0.0820 | 0.0417 +/- 0.0820 | 0.0570 +/- 0.0123 | +0.0052 | -0.0052 | 3 |
+| slots4_topk1 | prototype | 4 | 1 | 8 | 0.4714 +/- 0.0351 | -0.0052 +/- 0.0820 | 0.0052 +/- 0.0820 | 0.0846 +/- 0.0012 | -0.0521 | -0.0417 | 3 |
+| slots4_topk2 | prototype | 4 | 2 | 8 | 0.5078 +/- 0.0064 | -0.0312 +/- 0.1013 | 0.0312 +/- 0.1013 | 0.0747 +/- 0.0020 | -0.0156 | -0.0156 | 3 |
+
+## Notes
+
+- `slots_per_task` expands prototype capacity beyond the number of tasks.
+- `prototype_top_k` controls how hard the routing sparsity is per sample.
+- Positive `accuracy_gain_vs_task` means the prototype configuration beats task routing on average accuracy.
+- Positive `forgetting_gain_vs_task` means the prototype configuration forgets less than task routing.
