@@ -2,10 +2,22 @@
 Tests for continual-learning ASAM extensions.
 """
 
+from dataclasses import replace
+
 import torch
 
 from asam import ContinualASAMConfig, ContinualASAMLayer, PrototypeContinualASAMLayer
+import asam.continual_asam as continual_asam_module
 from asam.continual_asam import PrototypeSparseGate
+
+
+def _paired_layers(layer_cls, config):
+    legacy = layer_cls(replace(config, grouped_indexed_attention=False))
+    grouped = layer_cls(replace(config, grouped_indexed_attention=True))
+    grouped.load_state_dict(legacy.state_dict())
+    legacy.eval()
+    grouped.eval()
+    return legacy, grouped
 
 
 def test_continual_asam_forward_shapes():
@@ -84,6 +96,76 @@ def test_continual_asam_accepts_scalar_task_id():
     assert output.shape == x.shape
 
 
+def test_grouped_task_attention_matches_legacy_forward_and_backward():
+    torch.manual_seed(123)
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_tasks=4,
+        top_k_patterns=2,
+        dropout=0.0,
+    )
+    legacy, grouped = _paired_layers(ContinualASAMLayer, config)
+    task_ids = torch.tensor([0, 1, 0, 2])
+    mask = torch.ones(4, 1, 12, 12, dtype=torch.bool)
+    mask[:, :, 3, :] = False
+    x = torch.randn(4, 12, 32)
+    legacy_x = x.clone().requires_grad_(True)
+    grouped_x = x.clone().requires_grad_(True)
+
+    legacy_out, legacy_info = legacy(legacy_x, task_ids=task_ids, mask=mask, return_info=True)
+    grouped_out, grouped_info = grouped(grouped_x, task_ids=task_ids, mask=mask, return_info=True)
+
+    assert torch.allclose(grouped_out, legacy_out, atol=1e-6, rtol=1e-5)
+    assert torch.equal(grouped_info["task_pattern_masks"], legacy_info["task_pattern_masks"])
+    assert torch.allclose(grouped_info["pattern_logits"], legacy_info["pattern_logits"], atol=1e-6)
+    assert torch.allclose(grouped_info["pattern_weights"], legacy_info["pattern_weights"], atol=1e-6)
+    assert torch.allclose(grouped_info["head_importance"], legacy_info["head_importance"], atol=1e-6)
+
+    legacy_out.square().mean().backward()
+    grouped_out.square().mean().backward()
+
+    assert torch.allclose(grouped_x.grad, legacy_x.grad, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(grouped.to_qkv.weight.grad, legacy.to_qkv.weight.grad, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(grouped.to_out[0].weight.grad, legacy.to_out[0].weight.grad, atol=1e-6, rtol=1e-5)
+
+
+def test_grouped_task_attention_reuses_indices_for_repeated_signatures(monkeypatch):
+    torch.manual_seed(321)
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_tasks=4,
+        top_k_patterns=2,
+        dropout=0.0,
+        grouped_indexed_attention=True,
+    )
+    layer = ContinualASAMLayer(config)
+    layer.eval()
+    for parameter in layer.task_gate.parameters():
+        parameter.data.zero_()
+
+    calls = 0
+    original = continual_asam_module.pattern_mask_to_indices
+
+    def counted_pattern_mask_to_indices(pattern_mask):
+        nonlocal calls
+        calls += 1
+        return original(pattern_mask)
+
+    monkeypatch.setattr(continual_asam_module, "pattern_mask_to_indices", counted_pattern_mask_to_indices)
+
+    x = torch.randn(6, 10, 32)
+    task_ids = torch.tensor([0, 1, 2, 3, 0, 1])
+    output, info = layer(x, task_ids=task_ids, return_info=True)
+
+    assert output.shape == x.shape
+    assert info["task_pattern_masks"].shape == (6, 2, 10, 10)
+    assert calls == 1
+
+
 def test_prototype_continual_asam_forward_shapes():
     config = ContinualASAMConfig(
         dim=64,
@@ -112,6 +194,38 @@ def test_prototype_continual_asam_forward_shapes():
     assert torch.allclose(
         info["transport_loss_per_sample"].mean(),
         info["transport_loss"],
+        atol=1e-6,
+    )
+
+
+def test_grouped_prototype_attention_matches_legacy_forward_with_head_mask():
+    torch.manual_seed(456)
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_prototypes=5,
+        prototype_embed_dim=16,
+        top_k_patterns=2,
+        prototype_top_k=2,
+        dropout=0.0,
+    )
+    legacy, grouped = _paired_layers(PrototypeContinualASAMLayer, config)
+    mask = torch.ones(3, 2, 14, 14, dtype=torch.bool)
+    mask[0, 0, :, 7:] = False
+    mask[1, 1, 2, :] = False
+    x = torch.randn(3, 14, 32)
+
+    legacy_out, legacy_info = legacy(x, mask=mask, return_info=True)
+    grouped_out, grouped_info = grouped(x, mask=mask, return_info=True)
+
+    assert torch.allclose(grouped_out, legacy_out, atol=1e-6, rtol=1e-5)
+    assert torch.equal(grouped_info["prototype_pattern_masks"], legacy_info["prototype_pattern_masks"])
+    assert torch.allclose(grouped_info["prototype_weights"], legacy_info["prototype_weights"], atol=1e-6)
+    assert torch.equal(grouped_info["prototype_support"], legacy_info["prototype_support"])
+    assert torch.allclose(
+        grouped_info["transport_loss_per_sample"],
+        legacy_info["transport_loss_per_sample"],
         atol=1e-6,
     )
 

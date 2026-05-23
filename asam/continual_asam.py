@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from .asam_layer import ASAMConfig, ASAMLayer
 from ._common import (
     expand_pattern_mask,
+    normalize_attention_mask,
     pattern_mask_to_indices,
 )
 from .sparse_patterns import (
@@ -66,6 +67,8 @@ class ContinualASAMConfig(ASAMConfig):
     prototype_birkhoff_epsilon: float = 0.25
     prototype_birkhoff_diag_bias: float = 4.0
     prototype_birkhoff_gap_weight: float = 4.0
+    grouped_indexed_attention: bool = True
+    grouped_indexed_attention_max_group_size: int = 1
 
 
 class TaskAwareSparseGate(nn.Module):
@@ -384,15 +387,147 @@ class ContinualASAMLayer(ASAMLayer):
         seq_len: int,
         device: torch.device,
     ) -> torch.Tensor:
-        base_masks = self._get_base_pattern_masks(seq_len, device)
         top_k = min(self.continual_config.top_k_patterns, len(self.pattern_bank))
         top_indices = pattern_logits.topk(k=top_k, dim=-1).indices
+        return self._build_pattern_mask_from_indices(top_indices, seq_len, device)
 
+    def _build_pattern_mask_from_indices(
+        self,
+        top_indices: torch.Tensor,
+        seq_len: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        base_masks = self._get_base_pattern_masks(seq_len, device)
         selected_masks = []
         for head_index in range(self.num_heads):
             head_masks = base_masks[top_indices[head_index], head_index]
             selected_masks.append(head_masks.any(dim=0))
         return torch.stack(selected_masks, dim=0)
+
+    def _compute_legacy_pattern_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pattern_logits: torch.Tensor,
+        seq_len: int,
+        device: torch.device,
+        normalized_mask: Optional[torch.Tensor] = None,
+        return_pattern_masks: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        outputs = []
+        pattern_masks = []
+        batch = q.size(0)
+        for batch_index in range(batch):
+            pattern_mask = self._build_task_pattern_mask(
+                pattern_logits[batch_index],
+                seq_len,
+                device,
+            )
+            if return_pattern_masks:
+                pattern_masks.append(pattern_mask)
+
+            positions, valid_mask = pattern_mask_to_indices(pattern_mask)
+            sample_mask = None if normalized_mask is None else normalized_mask[batch_index : batch_index + 1]
+            sample_out = self._compute_sparse_attention_from_indices(
+                q[batch_index : batch_index + 1],
+                k[batch_index : batch_index + 1],
+                v[batch_index : batch_index + 1],
+                positions,
+                valid_mask,
+                mask=sample_mask,
+            )
+            outputs.append(sample_out)
+
+        stacked_masks = torch.stack(pattern_masks, dim=0) if return_pattern_masks else None
+        return torch.cat(outputs, dim=0), stacked_masks
+
+    def _compute_grouped_pattern_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pattern_logits: torch.Tensor,
+        seq_len: int,
+        device: torch.device,
+        normalized_mask: Optional[torch.Tensor] = None,
+        return_pattern_masks: bool = False,
+        group_hint_ids: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        if not bool(self.continual_config.grouped_indexed_attention):
+            return self._compute_legacy_pattern_attention(
+                q,
+                k,
+                v,
+                pattern_logits,
+                seq_len,
+                device,
+                normalized_mask=normalized_mask,
+                return_pattern_masks=return_pattern_masks,
+            )
+        if group_hint_ids is not None and group_hint_ids.numel() == q.size(0):
+            if group_hint_ids.unique().numel() == q.size(0):
+                return self._compute_legacy_pattern_attention(
+                    q,
+                    k,
+                    v,
+                    pattern_logits,
+                    seq_len,
+                    device,
+                    normalized_mask=normalized_mask,
+                    return_pattern_masks=return_pattern_masks,
+                )
+
+        top_k = min(self.continual_config.top_k_patterns, len(self.pattern_bank))
+        selected_patterns = pattern_logits.topk(k=top_k, dim=-1).indices
+        canonical_patterns = torch.sort(selected_patterns, dim=-1).values.reshape(q.size(0), -1)
+        _, group_ids = torch.unique(canonical_patterns, dim=0, return_inverse=True)
+        num_groups = int(group_ids.max().item()) + 1
+        if num_groups == q.size(0):
+            return self._compute_legacy_pattern_attention(
+                q,
+                k,
+                v,
+                pattern_logits,
+                seq_len,
+                device,
+                normalized_mask=normalized_mask,
+                return_pattern_masks=return_pattern_masks,
+            )
+
+        outputs = [None] * q.size(0)
+        pattern_masks = [None] * q.size(0) if return_pattern_masks else None
+        for group_id in range(num_groups):
+            group_index_tensor = torch.nonzero(group_ids == group_id, as_tuple=False).squeeze(-1)
+            group_indices = group_index_tensor.tolist()
+            first_index = group_indices[0]
+            top_indices = selected_patterns[first_index]
+            pattern_mask = self._build_pattern_mask_from_indices(top_indices, seq_len, device)
+            positions, valid_mask = pattern_mask_to_indices(pattern_mask)
+            max_group_size = int(self.continual_config.grouped_indexed_attention_max_group_size)
+            chunk_size = len(group_indices) if max_group_size <= 0 else max(1, max_group_size)
+            for chunk_start in range(0, len(group_indices), chunk_size):
+                chunk_indices = group_indices[chunk_start : chunk_start + chunk_size]
+                chunk_index_tensor = torch.tensor(chunk_indices, device=q.device, dtype=torch.long)
+                group_mask = None
+                if normalized_mask is not None:
+                    group_mask = normalized_mask.index_select(0, chunk_index_tensor)
+                group_out = self._compute_sparse_attention_from_indices(
+                    q.index_select(0, chunk_index_tensor),
+                    k.index_select(0, chunk_index_tensor),
+                    v.index_select(0, chunk_index_tensor),
+                    positions,
+                    valid_mask,
+                    mask=group_mask,
+                )
+                for offset, batch_index in enumerate(chunk_indices):
+                    outputs[batch_index] = group_out[offset : offset + 1]
+                    if pattern_masks is not None:
+                        pattern_masks[batch_index] = pattern_mask
+
+        attn_out = torch.cat(outputs, dim=0)
+        stacked_masks = torch.stack(pattern_masks, dim=0) if pattern_masks is not None else None
+        return attn_out, stacked_masks
 
     def _effective_support_scores(
         self,
@@ -507,31 +642,19 @@ class ContinualASAMLayer(ASAMLayer):
 
         normalized_mask = None
         if mask is not None:
-            normalized_mask = self._normalize_attention_mask(mask, batch, self.num_heads, seq_len)
+            normalized_mask = normalize_attention_mask(mask, batch, self.num_heads, seq_len)
 
-        outputs = []
-        task_pattern_masks = []
-        for batch_index in range(batch):
-            task_pattern_mask = self._build_task_pattern_mask(
-                gate_info["pattern_logits"][batch_index],
-                seq_len,
-                x.device,
-            )
-            task_pattern_masks.append(task_pattern_mask)
-
-            positions, valid_mask = pattern_mask_to_indices(task_pattern_mask)
-            sample_mask = None if normalized_mask is None else normalized_mask[batch_index : batch_index + 1]
-            sample_out = self._compute_sparse_attention_from_indices(
-                q[batch_index : batch_index + 1],
-                k[batch_index : batch_index + 1],
-                v[batch_index : batch_index + 1],
-                positions,
-                valid_mask,
-                mask=sample_mask,
-            )
-            outputs.append(sample_out)
-
-        attn_out = torch.cat(outputs, dim=0)
+        attn_out, task_pattern_masks = self._compute_grouped_pattern_attention(
+            q,
+            k,
+            v,
+            gate_info["pattern_logits"],
+            seq_len,
+            x.device,
+            normalized_mask=normalized_mask,
+            return_pattern_masks=return_info,
+            group_hint_ids=task_ids,
+        )
         attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, dim)
         attn_out = self.to_out(attn_out)
 
@@ -562,7 +685,7 @@ class ContinualASAMLayer(ASAMLayer):
             "pattern_weights": gate_info["pattern_weights"],
             "head_importance": gate_info["head_importance"],
             "selected_patterns": selected_patterns,
-            "task_pattern_masks": torch.stack(task_pattern_masks, dim=0),
+            "task_pattern_masks": task_pattern_masks,
             **regularization,
         }
         return x, info
@@ -1399,31 +1522,19 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
 
         normalized_mask = None
         if mask is not None:
-            normalized_mask = self._normalize_attention_mask(mask, batch, self.num_heads, seq_len)
+            normalized_mask = normalize_attention_mask(mask, batch, self.num_heads, seq_len)
 
-        outputs = []
-        prototype_pattern_masks = []
-        for batch_index in range(batch):
-            prototype_pattern_mask = self._build_task_pattern_mask(
-                gate_info["pattern_logits"][batch_index],
-                seq_len,
-                x.device,
-            )
-            prototype_pattern_masks.append(prototype_pattern_mask)
-
-            positions, valid_mask = pattern_mask_to_indices(prototype_pattern_mask)
-            sample_mask = None if normalized_mask is None else normalized_mask[batch_index : batch_index + 1]
-            sample_out = self._compute_sparse_attention_from_indices(
-                q[batch_index : batch_index + 1],
-                k[batch_index : batch_index + 1],
-                v[batch_index : batch_index + 1],
-                positions,
-                valid_mask,
-                mask=sample_mask,
-            )
-            outputs.append(sample_out)
-
-        attn_out = torch.cat(outputs, dim=0)
+        attn_out, prototype_pattern_masks = self._compute_grouped_pattern_attention(
+            q,
+            k,
+            v,
+            gate_info["pattern_logits"],
+            seq_len,
+            x.device,
+            normalized_mask=normalized_mask,
+            return_pattern_masks=return_info,
+            group_hint_ids=task_ids,
+        )
         attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, dim)
         attn_out = self.to_out(attn_out)
 
@@ -1468,7 +1579,7 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             "pattern_weights": gate_info["pattern_weights"],
             "head_importance": gate_info["head_importance"],
             "selected_patterns": selected_patterns,
-            "prototype_pattern_masks": torch.stack(prototype_pattern_masks, dim=0),
+            "prototype_pattern_masks": prototype_pattern_masks,
             **regularization,
         }
         return x, info
