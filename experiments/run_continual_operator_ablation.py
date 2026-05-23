@@ -51,6 +51,7 @@ class OperatorAblationArgs:
     prototype_merge_threshold: float = 0.9
     prototype_merge_usage_threshold: float = 0.1
     prototype_masked_sinkhorn_candidate_k: int = 0
+    prototype_masked_sinkhorn_capacity_bias: float = 0.0
     prototype_prior_strength: float = 1.0
     prototype_capacity_blend: float = 0.5
     prototype_relocation_strength: float = 0.75
@@ -139,6 +140,9 @@ def build_benchmark_args(args: OperatorAblationArgs, strategy: Dict[str, object]
         prototype_merge_usage_threshold=float(strategy.get("prototype_merge_usage_threshold", args.prototype_merge_usage_threshold)),
         prototype_masked_sinkhorn_candidate_k=int(
             strategy.get("prototype_masked_sinkhorn_candidate_k", args.prototype_masked_sinkhorn_candidate_k)
+        ),
+        prototype_masked_sinkhorn_capacity_bias=float(
+            strategy.get("prototype_masked_sinkhorn_capacity_bias", args.prototype_masked_sinkhorn_capacity_bias)
         ),
         prototype_prior_strength=args.prototype_prior_strength,
         prototype_capacity_blend=args.prototype_capacity_blend,

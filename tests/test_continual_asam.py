@@ -291,6 +291,93 @@ def test_masked_sinkhorn_routes_only_inside_support_and_tracks_effective_capacit
     assert torch.allclose(effective_capacity.sum(), torch.tensor(1.0), atol=1e-6)
 
 
+def test_masked_sinkhorn_capacity_bias_selects_lower_residual_support():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+        masked_sinkhorn_candidate_k=2,
+        masked_sinkhorn_capacity_bias=1.0,
+    )
+    logits = torch.tensor([[0.0, 0.35, 0.25, -1.0]] * 4)
+    routing_prior = torch.tensor([[0.55, 0.15, 0.15, 0.15]] * 4)
+    target_capacity = gate._build_capacity_target(routing_prior)
+
+    baseline_support = gate._build_masked_sinkhorn_support(logits)
+    baseline_capacity = gate._project_capacity_to_support(target_capacity, baseline_support)
+    weights, support, selected_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+
+    baseline_residual = (baseline_capacity - target_capacity).abs().sum()
+    selected_residual = (selected_capacity - target_capacity).abs().sum()
+
+    assert selected_residual < baseline_residual
+    assert not torch.equal(support, baseline_support)
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+
+
+def test_masked_sinkhorn_capacity_bias_guard_keeps_baseline_when_biased_is_worse():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+        masked_sinkhorn_candidate_k=2,
+        masked_sinkhorn_capacity_bias=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [-0.5887, -0.8864, 3.0269, 2.8514],
+            [0.8097, -0.0437, -0.5222, -1.4857],
+            [0.1288, -2.5594, -1.6104, -2.5044],
+            [-2.4383, -0.7262, 1.0075, -1.1631],
+            [1.6340, -0.9426, 0.5532, -3.9280],
+        ]
+    )
+    routing_prior = torch.tensor([[0.3064, 0.1764, 0.2977, 0.2196]] * logits.size(0))
+    baseline_support = gate._build_masked_sinkhorn_support(logits)
+
+    _, support, selected_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+    target_capacity = gate._build_capacity_target(routing_prior)
+    baseline_capacity = gate._project_capacity_to_support(target_capacity, baseline_support)
+
+    assert torch.equal(support, baseline_support)
+    assert torch.allclose(selected_capacity, baseline_capacity, atol=1e-6)
+
+
+def test_masked_sinkhorn_zero_capacity_bias_keeps_logits_topk_support():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+        masked_sinkhorn_candidate_k=2,
+        masked_sinkhorn_capacity_bias=0.0,
+    )
+    logits = torch.tensor([[0.0, 0.35, 0.25, -1.0]] * 4)
+    routing_prior = torch.tensor([[0.55, 0.15, 0.15, 0.15]] * 4)
+
+    _, support, _ = gate._route_with_masked_sinkhorn(logits, routing_prior)
+
+    assert torch.equal(support, gate._build_masked_sinkhorn_support(logits))
+
+
 def test_masked_sinkhorn_reduces_capacity_violation_vs_dense_then_projected_topk():
     gate = PrototypeSparseGate(
         dim=16,
@@ -499,6 +586,23 @@ def test_prototype_layer_accepts_masked_sinkhorn_strategy():
     assert torch.allclose(info["prototype_weights"].sum(dim=-1), torch.ones(3), atol=1e-5)
     assert torch.all(info["prototype_weights"].masked_select(~info["prototype_support"]) == 0.0)
     assert torch.isfinite(info["transport_loss"])
+
+
+def test_prototype_layer_propagates_masked_sinkhorn_capacity_bias():
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_prototypes=4,
+        prototype_embed_dim=16,
+        prototype_top_k=2,
+        prototype_routing_strategy="masked_sinkhorn_topk",
+        prototype_masked_sinkhorn_capacity_bias=0.75,
+    )
+    layer = PrototypeContinualASAMLayer(config)
+
+    assert layer.continual_config.prototype_masked_sinkhorn_capacity_bias == 0.75
+    assert layer.prototype_gate.masked_sinkhorn_capacity_bias == 0.75
 
 
 def test_prototype_routing_is_topk_sparse_and_memory_biased():
@@ -839,6 +943,7 @@ def test_prototype_hyperparameter_round_trip_tracks_merge_controls():
     model.set_prototype_hyperparameters(
         prototype_prior_strength=1.5,
         prototype_capacity_blend=0.4,
+        prototype_masked_sinkhorn_capacity_bias=0.8,
         prototype_relocation_strength=0.6,
         prototype_merge_threshold=0.8,
         prototype_merge_usage_threshold=0.05,
@@ -847,6 +952,7 @@ def test_prototype_hyperparameter_round_trip_tracks_merge_controls():
 
     assert params["prototype_prior_strength"] == 1.5
     assert params["prototype_capacity_blend"] == 0.4
+    assert params["prototype_masked_sinkhorn_capacity_bias"] == 0.8
     assert params["prototype_relocation_strength"] == 0.6
     assert params["prototype_merge_threshold"] == 0.8
     assert params["prototype_merge_usage_threshold"] == 0.05

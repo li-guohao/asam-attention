@@ -26,6 +26,7 @@ class _DummyPrototypeModel:
         self.state = {
             "prototype_prior_strength": 1.0,
             "prototype_capacity_blend": 0.5,
+            "prototype_masked_sinkhorn_capacity_bias": 0.0,
             "prototype_relocation_strength": 0.75,
             "prototype_merge_threshold": 0.9,
             "prototype_merge_usage_threshold": 0.1,
@@ -39,6 +40,7 @@ class _DummyPrototypeModel:
         self,
         prototype_prior_strength=None,
         prototype_capacity_blend=None,
+        prototype_masked_sinkhorn_capacity_bias=None,
         prototype_relocation_strength=None,
         prototype_merge_threshold=None,
         prototype_merge_usage_threshold=None,
@@ -48,6 +50,8 @@ class _DummyPrototypeModel:
             self.state["prototype_prior_strength"] = float(prototype_prior_strength)
         if prototype_capacity_blend is not None:
             self.state["prototype_capacity_blend"] = float(prototype_capacity_blend)
+        if prototype_masked_sinkhorn_capacity_bias is not None:
+            self.state["prototype_masked_sinkhorn_capacity_bias"] = float(prototype_masked_sinkhorn_capacity_bias)
         if prototype_relocation_strength is not None:
             self.state["prototype_relocation_strength"] = float(prototype_relocation_strength)
         if prototype_merge_threshold is not None:
@@ -149,6 +153,7 @@ def test_masked_sinkhorn_candidate_k_reaches_classifier_config():
         routing_mode="prototype",
         prototype_routing_strategy="masked_sinkhorn_topk",
         prototype_masked_sinkhorn_candidate_k=6,
+        prototype_masked_sinkhorn_capacity_bias=0.5,
     )
 
     model = ContinualTextClassifier(
@@ -163,11 +168,14 @@ def test_masked_sinkhorn_candidate_k_reaches_classifier_config():
         routing_mode=args.routing_mode,
         prototype_routing_strategy=args.prototype_routing_strategy,
         prototype_masked_sinkhorn_candidate_k=args.prototype_masked_sinkhorn_candidate_k,
+        prototype_masked_sinkhorn_capacity_bias=args.prototype_masked_sinkhorn_capacity_bias,
     )
 
     layer = model.layers[0]
     assert layer.continual_config.prototype_masked_sinkhorn_candidate_k == 6
+    assert layer.continual_config.prototype_masked_sinkhorn_capacity_bias == 0.5
     assert layer.prototype_gate.masked_sinkhorn_candidate_k == 6
+    assert layer.prototype_gate.masked_sinkhorn_capacity_bias == 0.5
 
 
 def test_theory_diagnostics_track_task_transport_statistics():
