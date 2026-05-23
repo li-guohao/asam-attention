@@ -246,6 +246,40 @@ def compute_theory_diagnostics(
         _safe_float(item.get("weighted_transport_loss", item.get("transport_loss")))
         for item in stage_training_metrics
     ]
+    stage_candidate_support_residual = [
+        _safe_float(item.get("candidate_support_residual"))
+        for item in stage_training_metrics
+    ]
+    stage_support_projection_residual = [
+        _safe_float(item.get("support_projection_residual"))
+        for item in stage_training_metrics
+    ]
+    stage_support_residual_delta = [
+        _safe_float(item.get("support_residual_delta"))
+        for item in stage_training_metrics
+    ]
+    stage_target_capacity_residual = [
+        _safe_float(item.get("target_capacity_residual"))
+        for item in stage_training_metrics
+    ]
+    stage_effective_capacity_residual = [
+        _safe_float(item.get("effective_capacity_residual"))
+        for item in stage_training_metrics
+    ]
+    stage_support_density = [_safe_float(item.get("support_density")) for item in stage_training_metrics]
+    stage_support_size = [_safe_float(item.get("support_size")) for item in stage_training_metrics]
+    stage_support_active_prototypes = [
+        _safe_float(item.get("support_active_prototypes"))
+        for item in stage_training_metrics
+    ]
+    stage_support_weight_leakage = [
+        _safe_float(item.get("support_weight_leakage"))
+        for item in stage_training_metrics
+    ]
+    stage_capacity_bias_selection_rate = [
+        _safe_float(item.get("capacity_bias_selection_rate"))
+        for item in stage_training_metrics
+    ]
     stage_merge_count = [_safe_float(item.get("merge_count")) for item in prototype_lifecycle]
     stage_birkhoff_base_strength = [_safe_float(item.get("birkhoff_base_strength")) for item in prototype_lifecycle]
     stage_birkhoff_strength = [_safe_float(item.get("birkhoff_strength")) for item in prototype_lifecycle]
@@ -293,6 +327,16 @@ def compute_theory_diagnostics(
         "stage_overlap_loss": stage_overlap_loss,
         "stage_transport_loss": stage_transport_loss,
         "stage_weighted_transport_loss": stage_weighted_transport_loss,
+        "stage_candidate_support_residual": stage_candidate_support_residual,
+        "stage_support_projection_residual": stage_support_projection_residual,
+        "stage_support_residual_delta": stage_support_residual_delta,
+        "stage_target_capacity_residual": stage_target_capacity_residual,
+        "stage_effective_capacity_residual": stage_effective_capacity_residual,
+        "stage_support_density": stage_support_density,
+        "stage_support_size": stage_support_size,
+        "stage_support_active_prototypes": stage_support_active_prototypes,
+        "stage_support_weight_leakage": stage_support_weight_leakage,
+        "stage_capacity_bias_selection_rate": stage_capacity_bias_selection_rate,
         "stage_task_transport_gap": stage_task_transport_gap,
         "stage_task_max_transport_gap": stage_task_max_transport_gap,
         "stage_task_transport_loss": stage_task_transport_loss,
@@ -313,6 +357,16 @@ def compute_theory_diagnostics(
             "transport_gap": correlation(stage_forgetting, stage_transport_gap),
             "transport_loss": correlation(stage_forgetting, stage_transport_loss),
             "weighted_transport_loss": correlation(stage_forgetting, stage_weighted_transport_loss),
+            "candidate_support_residual": correlation(stage_forgetting, stage_candidate_support_residual),
+            "support_projection_residual": correlation(stage_forgetting, stage_support_projection_residual),
+            "support_residual_delta": correlation(stage_forgetting, stage_support_residual_delta),
+            "target_capacity_residual": correlation(stage_forgetting, stage_target_capacity_residual),
+            "effective_capacity_residual": correlation(stage_forgetting, stage_effective_capacity_residual),
+            "support_density": correlation(stage_forgetting, stage_support_density),
+            "support_size": correlation(stage_forgetting, stage_support_size),
+            "support_active_prototypes": correlation(stage_forgetting, stage_support_active_prototypes),
+            "support_weight_leakage": correlation(stage_forgetting, stage_support_weight_leakage),
+            "capacity_bias_selection_rate": correlation(stage_forgetting, stage_capacity_bias_selection_rate),
             "max_transport_gap": correlation(stage_forgetting, stage_max_transport_gap),
             "mean_abs_excess": correlation(stage_forgetting, stage_mean_abs_excess),
             "merge_count": correlation(stage_forgetting, stage_merge_count),

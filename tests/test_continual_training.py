@@ -83,6 +83,9 @@ def test_continual_training_scaffold_supports_prototype_routing(tmp_path):
     assert "layer_latent_ema" in results["prototype_diagnostics"][-1]
     assert all(key in results["prototype_lifecycle"][-1] for key in ["reset_count", "split_count", "merge_count"])
     assert "transport_loss" in results["stage_training_metrics"][-1]
+    assert "support_projection_residual" in results["stage_training_metrics"][-1]
+    assert "effective_capacity_residual" in results["stage_training_metrics"][-1]
+    assert "support_density" in results["stage_training_metrics"][-1]
 
 
 def test_resolve_prototype_layout_enforces_true_sparse_support():

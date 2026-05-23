@@ -315,12 +315,14 @@ class PrototypeSparseGate(nn.Module):
         self,
         logits: torch.Tensor,
         target_capacity: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        return_selection: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
         baseline_support = self._build_masked_sinkhorn_support(logits)
         baseline_capacity = self._project_capacity_to_support(target_capacity, baseline_support)
         beta = float(self.masked_sinkhorn_capacity_bias)
         if beta <= 0.0:
-            return baseline_support, baseline_capacity
+            result = (baseline_support, baseline_capacity, False)
+            return result if return_selection else result[:2]
 
         capacity_scores = logits + beta * torch.log(
             target_capacity.to(device=logits.device, dtype=logits.dtype).clamp_min(self.prior_floor)
@@ -331,8 +333,55 @@ class PrototypeSparseGate(nn.Module):
         baseline_residual = (baseline_capacity - target_capacity).abs().sum()
         biased_residual = (biased_capacity - target_capacity).abs().sum()
         if biased_residual.item() < baseline_residual.item():
-            return biased_support, biased_capacity
-        return baseline_support, baseline_capacity
+            result = (biased_support, biased_capacity, True)
+            return result if return_selection else result[:2]
+        result = (baseline_support, baseline_capacity, False)
+        return result if return_selection else result[:2]
+
+    def _build_support_diagnostics(
+        self,
+        logits: torch.Tensor,
+        target_capacity: torch.Tensor,
+        prototype_weights: torch.Tensor,
+        prototype_support: torch.Tensor,
+        prototype_capacity: torch.Tensor,
+        candidate_support: torch.Tensor,
+        proposal_weights: Optional[torch.Tensor] = None,
+        biased_support_selected: bool = False,
+    ) -> Dict[str, torch.Tensor]:
+        with torch.no_grad():
+            diagnostic_weights = prototype_weights.detach()
+            target_capacity = target_capacity.detach().to(device=diagnostic_weights.device, dtype=diagnostic_weights.dtype)
+            prototype_capacity = prototype_capacity.detach().to(
+                device=diagnostic_weights.device,
+                dtype=diagnostic_weights.dtype,
+            )
+            candidate_support = candidate_support.detach().to(device=diagnostic_weights.device)
+            prototype_support = prototype_support.detach().to(device=diagnostic_weights.device)
+            candidate_capacity = self._project_capacity_to_support(target_capacity, candidate_support)
+            support_capacity = self._project_capacity_to_support(target_capacity, prototype_support)
+            candidate_residual = (candidate_capacity - target_capacity).abs().mean()
+            support_residual = (support_capacity - target_capacity).abs().mean()
+            mean_weights = diagnostic_weights.mean(dim=0)
+            leakage_weights = diagnostic_weights if proposal_weights is None else proposal_weights.detach().to(
+                device=diagnostic_weights.device,
+                dtype=diagnostic_weights.dtype,
+            )
+            return {
+                "prototype_target_capacity": target_capacity.detach(),
+                "candidate_support_residual": candidate_residual.detach(),
+                "support_projection_residual": support_residual.detach(),
+                "support_residual_delta": (candidate_residual - support_residual).detach(),
+                "target_capacity_residual": (mean_weights - target_capacity).abs().mean().detach(),
+                "effective_capacity_residual": (mean_weights - prototype_capacity).abs().mean().detach(),
+                "support_density": prototype_support.float().mean().detach(),
+                "support_size": prototype_support.float().sum(dim=-1).mean().detach(),
+                "support_active_prototypes": prototype_support.any(dim=0).float().sum().detach(),
+                "support_weight_leakage": leakage_weights.masked_select(~prototype_support).abs().sum().detach(),
+                "capacity_bias_selection_rate": diagnostic_weights.new_tensor(
+                    1.0 if biased_support_selected else 0.0
+                ).detach(),
+            }
 
     def _masked_sinkhorn_transport_weights(
         self,
@@ -372,22 +421,55 @@ class PrototypeSparseGate(nn.Module):
         self,
         logits: torch.Tensor,
         routing_prior: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return_diagnostics: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
         target_capacity = self._build_capacity_target(routing_prior)
+        candidate_support = self._build_masked_sinkhorn_support(logits)
         candidate_k = int(self.masked_sinkhorn_candidate_k)
         if candidate_k <= 0:
             candidate_k = self.top_k
         if min(max(1, candidate_k), logits.size(-1)) >= logits.size(-1):
-            return self._route_with_sinkhorn(logits, routing_prior)
+            weights, support, effective_capacity = self._route_with_sinkhorn(logits, routing_prior)
+            if not return_diagnostics:
+                return weights, support, effective_capacity
+            proposal_weights = self._sinkhorn_transport_weights(logits.detach(), target_capacity.detach())
+            diagnostics = self._build_support_diagnostics(
+                logits=logits,
+                target_capacity=target_capacity,
+                prototype_weights=weights,
+                prototype_support=support,
+                prototype_capacity=effective_capacity,
+                candidate_support=candidate_support,
+                proposal_weights=proposal_weights,
+                biased_support_selected=False,
+            )
+            return weights, support, effective_capacity, diagnostics
 
-        support, effective_capacity = self._select_masked_sinkhorn_support(logits, target_capacity)
+        support, effective_capacity, biased_support_selected = self._select_masked_sinkhorn_support(
+            logits,
+            target_capacity,
+            return_selection=True,
+        )
 
         weights = self._masked_sinkhorn_transport_weights(
             logits=logits,
             target_capacity=effective_capacity,
             support=support,
         )
-        return weights, support, effective_capacity
+        if not return_diagnostics:
+            return weights, support, effective_capacity
+        proposal_weights = self._sinkhorn_transport_weights(logits.detach(), target_capacity.detach())
+        diagnostics = self._build_support_diagnostics(
+            logits=logits,
+            target_capacity=target_capacity,
+            prototype_weights=weights,
+            prototype_support=support,
+            prototype_capacity=effective_capacity,
+            candidate_support=candidate_support,
+            proposal_weights=proposal_weights,
+            biased_support_selected=biased_support_selected,
+        )
+        return weights, support, effective_capacity, diagnostics
 
     def forward(
         self,
@@ -414,14 +496,40 @@ class PrototypeSparseGate(nn.Module):
                 proximal_logits,
                 routing_prior,
             )
+            proposal_weights = self._sinkhorn_transport_weights(
+                proximal_logits.detach(),
+                self._build_capacity_target(routing_prior).detach(),
+            )
+            support_diagnostics = self._build_support_diagnostics(
+                logits=proximal_logits,
+                target_capacity=self._build_capacity_target(routing_prior),
+                prototype_weights=prototype_weights,
+                prototype_support=prototype_support,
+                prototype_capacity=prototype_capacity,
+                candidate_support=self._build_masked_sinkhorn_support(proximal_logits),
+                proposal_weights=proposal_weights,
+                biased_support_selected=False,
+            )
         elif self.routing_strategy == "masked_sinkhorn_topk":
-            prototype_weights, prototype_support, prototype_capacity = self._route_with_masked_sinkhorn(
+            prototype_weights, prototype_support, prototype_capacity, support_diagnostics = self._route_with_masked_sinkhorn(
                 proximal_logits,
                 routing_prior,
+                return_diagnostics=True,
             )
         elif self.routing_strategy == "kl_topk":
             prototype_weights, prototype_support = self._topk_sparse_softmax(proximal_logits)
             prototype_capacity = routing_prior.mean(dim=0)
+            proposal_weights = F.softmax(proximal_logits, dim=-1)
+            support_diagnostics = self._build_support_diagnostics(
+                logits=proximal_logits,
+                target_capacity=self._build_capacity_target(routing_prior),
+                prototype_weights=prototype_weights,
+                prototype_support=prototype_support,
+                prototype_capacity=prototype_capacity,
+                candidate_support=self._build_masked_sinkhorn_support(proximal_logits),
+                proposal_weights=proposal_weights,
+                biased_support_selected=False,
+            )
         else:
             raise ValueError(f"Unsupported routing strategy: {self.routing_strategy}")
 
@@ -443,6 +551,7 @@ class PrototypeSparseGate(nn.Module):
             "pattern_logits": pattern_logits,
             "pattern_weights": pattern_weights,
             "head_importance": head_importance,
+            **support_diagnostics,
         }
 
 
@@ -1702,6 +1811,7 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             "proximal_logits": gate_info["proximal_logits"],
             "prototype_prior": gate_info["prototype_prior"],
             "prototype_capacity": gate_info["prototype_capacity"],
+            "prototype_target_capacity": gate_info["prototype_target_capacity"],
             "prototype_support": gate_info["prototype_support"],
             "prototype_weights": gate_info["prototype_weights"],
             "prototype_usage": self.prototype_usage_ema.detach().clone(),
@@ -1716,4 +1826,17 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             "prototype_pattern_masks": prototype_pattern_masks,
             **regularization,
         }
+        for key in [
+            "candidate_support_residual",
+            "support_projection_residual",
+            "support_residual_delta",
+            "target_capacity_residual",
+            "effective_capacity_residual",
+            "support_density",
+            "support_size",
+            "support_active_prototypes",
+            "support_weight_leakage",
+            "capacity_bias_selection_rate",
+        ]:
+            info[key] = gate_info[key]
         return x, info

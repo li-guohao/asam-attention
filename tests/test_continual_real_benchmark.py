@@ -223,6 +223,13 @@ def test_theory_diagnostics_track_task_transport_statistics():
     assert theory["stage_task_max_transport_gap"] == [[0.18], [0.24, 0.08]]
     assert theory["stage_task_transport_loss"] == [[0.31], [0.28, 0.07]]
     assert theory["stage_weighted_transport_loss"] == [0.03, 0.05]
+    assert theory["stage_support_projection_residual"] == [0.0, 0.0]
+    assert theory["stage_effective_capacity_residual"] == [0.0, 0.0]
+    assert theory["stage_support_density"] == [0.0, 0.0]
+    assert "support_projection_residual" in theory["forgetting_correlations"]
+    assert "effective_capacity_residual" in theory["forgetting_correlations"]
+    assert "support_density" in theory["forgetting_correlations"]
+    assert "support_residual_delta" in theory["forgetting_correlations"]
 
 
 

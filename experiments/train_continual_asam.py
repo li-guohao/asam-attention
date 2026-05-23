@@ -248,6 +248,23 @@ class ContinualTextClassifier(nn.Module):
             for info in layer_infos
             if "transport_loss_per_sample" in info
         ]
+        diagnostic_keys = [
+            "candidate_support_residual",
+            "support_projection_residual",
+            "support_residual_delta",
+            "target_capacity_residual",
+            "effective_capacity_residual",
+            "support_density",
+            "support_size",
+            "support_active_prototypes",
+            "support_weight_leakage",
+            "capacity_bias_selection_rate",
+        ]
+        scalar_diagnostics = {}
+        for key in diagnostic_keys:
+            terms = [layer_info[key] for layer_info in layer_infos if key in layer_info]
+            if terms:
+                scalar_diagnostics[key] = torch.stack(terms).mean()
         info = {
             "layer_infos": layer_infos,
             "overlap_loss": overlap_loss,
@@ -265,6 +282,7 @@ class ContinualTextClassifier(nn.Module):
                 if transport_per_sample_terms
                 else overlap_loss.new_zeros((inputs.size(0),))
             ),
+            **scalar_diagnostics,
         }
         return logits, info
 
@@ -587,10 +605,28 @@ def collect_prototype_diagnostics(
     task_transport_gap = []
     task_max_transport_gap = []
     task_transport_loss = []
+    task_candidate_support_residual = []
+    task_support_residual_delta = []
+    task_support_projection_residual = []
+    task_effective_capacity_residual = []
+    task_support_density = []
+    task_support_size = []
+    task_support_active_prototypes = []
+    task_support_weight_leakage = []
+    task_capacity_bias_selection_rate = []
     for task_id in range(num_seen_tasks):
         prototype_sum = None
         entropy_sum = 0.0
         transport_loss_sum = 0.0
+        candidate_support_sum = 0.0
+        support_residual_delta_sum = 0.0
+        support_projection_sum = 0.0
+        effective_capacity_sum = 0.0
+        support_density_sum = 0.0
+        support_size_sum = 0.0
+        support_active_prototypes_sum = 0.0
+        support_weight_leakage_sum = 0.0
+        capacity_bias_selection_sum = 0.0
         sample_count = 0
 
         for inputs, _labels, task_ids in val_loaders[task_id]:
@@ -617,6 +653,24 @@ def collect_prototype_diagnostics(
             transport_loss_per_sample = info.get("transport_loss_per_sample")
             if transport_loss_per_sample is not None:
                 transport_loss_sum += transport_loss_per_sample.sum().item()
+            if "support_projection_residual" in info:
+                support_projection_sum += float(info["support_projection_residual"].item()) * average_weights.size(0)
+            if "candidate_support_residual" in info:
+                candidate_support_sum += float(info["candidate_support_residual"].item()) * average_weights.size(0)
+            if "support_residual_delta" in info:
+                support_residual_delta_sum += float(info["support_residual_delta"].item()) * average_weights.size(0)
+            if "effective_capacity_residual" in info:
+                effective_capacity_sum += float(info["effective_capacity_residual"].item()) * average_weights.size(0)
+            if "support_density" in info:
+                support_density_sum += float(info["support_density"].item()) * average_weights.size(0)
+            if "support_size" in info:
+                support_size_sum += float(info["support_size"].item()) * average_weights.size(0)
+            if "support_active_prototypes" in info:
+                support_active_prototypes_sum += float(info["support_active_prototypes"].item()) * average_weights.size(0)
+            if "support_weight_leakage" in info:
+                support_weight_leakage_sum += float(info["support_weight_leakage"].item()) * average_weights.size(0)
+            if "capacity_bias_selection_rate" in info:
+                capacity_bias_selection_sum += float(info["capacity_bias_selection_rate"].item()) * average_weights.size(0)
             sample_count += average_weights.size(0)
 
         if prototype_sum is None:
@@ -625,6 +679,15 @@ def collect_prototype_diagnostics(
             task_transport_gap.append(0.0)
             task_max_transport_gap.append(0.0)
             task_transport_loss.append(0.0)
+            task_support_projection_residual.append(0.0)
+            task_candidate_support_residual.append(0.0)
+            task_support_residual_delta.append(0.0)
+            task_effective_capacity_residual.append(0.0)
+            task_support_density.append(0.0)
+            task_support_size.append(0.0)
+            task_support_active_prototypes.append(0.0)
+            task_support_weight_leakage.append(0.0)
+            task_capacity_bias_selection_rate.append(0.0)
         else:
             mean_weights = prototype_sum / max(1, sample_count)
             task_prototype_heatmap.append(mean_weights.cpu().tolist())
@@ -637,6 +700,15 @@ def collect_prototype_diagnostics(
             task_transport_gap.append(float(gap.mean().item()))
             task_max_transport_gap.append(float(gap.max().item()))
             task_transport_loss.append(float(transport_loss_sum / max(1, sample_count)))
+            task_candidate_support_residual.append(float(candidate_support_sum / max(1, sample_count)))
+            task_support_residual_delta.append(float(support_residual_delta_sum / max(1, sample_count)))
+            task_support_projection_residual.append(float(support_projection_sum / max(1, sample_count)))
+            task_effective_capacity_residual.append(float(effective_capacity_sum / max(1, sample_count)))
+            task_support_density.append(float(support_density_sum / max(1, sample_count)))
+            task_support_size.append(float(support_size_sum / max(1, sample_count)))
+            task_support_active_prototypes.append(float(support_active_prototypes_sum / max(1, sample_count)))
+            task_support_weight_leakage.append(float(support_weight_leakage_sum / max(1, sample_count)))
+            task_capacity_bias_selection_rate.append(float(capacity_bias_selection_sum / max(1, sample_count)))
 
     layer_similarity = []
     layer_usage = []
@@ -666,6 +738,15 @@ def collect_prototype_diagnostics(
         "task_transport_gap": task_transport_gap,
         "task_max_transport_gap": task_max_transport_gap,
         "task_transport_loss": task_transport_loss,
+        "task_candidate_support_residual": task_candidate_support_residual,
+        "task_support_residual_delta": task_support_residual_delta,
+        "task_support_projection_residual": task_support_projection_residual,
+        "task_effective_capacity_residual": task_effective_capacity_residual,
+        "task_support_density": task_support_density,
+        "task_support_size": task_support_size,
+        "task_support_active_prototypes": task_support_active_prototypes,
+        "task_support_weight_leakage": task_support_weight_leakage,
+        "task_capacity_bias_selection_rate": task_capacity_bias_selection_rate,
         "layer_similarity": layer_similarity,
         "layer_usage_ema": layer_usage,
         "layer_capacity_ema": layer_capacity_ema,
@@ -693,6 +774,16 @@ def train_task(
         "diversity_loss": 0.0,
         "transport_loss": 0.0,
         "routing_stability_loss": 0.0,
+        "candidate_support_residual": 0.0,
+        "support_projection_residual": 0.0,
+        "support_residual_delta": 0.0,
+        "target_capacity_residual": 0.0,
+        "effective_capacity_residual": 0.0,
+        "support_density": 0.0,
+        "support_size": 0.0,
+        "support_active_prototypes": 0.0,
+        "support_weight_leakage": 0.0,
+        "capacity_bias_selection_rate": 0.0,
     }
     step_count = 0
 
@@ -729,6 +820,20 @@ def train_task(
             metric_sums["diversity_loss"] += float(info["diversity_loss"].item())
             metric_sums["transport_loss"] += float(info["transport_loss"].item())
             metric_sums["routing_stability_loss"] += float(info.get("routing_stability_loss", info["stability_loss"]).item())
+            for key in [
+                "candidate_support_residual",
+                "support_projection_residual",
+                "support_residual_delta",
+                "target_capacity_residual",
+                "effective_capacity_residual",
+                "support_density",
+                "support_size",
+                "support_active_prototypes",
+                "support_weight_leakage",
+                "capacity_bias_selection_rate",
+            ]:
+                if key in info:
+                    metric_sums[key] += float(info[key].item())
             step_count += 1
 
     return {key: value / max(1, step_count) for key, value in metric_sums.items()}

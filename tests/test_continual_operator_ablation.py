@@ -45,12 +45,17 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
                 "stage_transport_gap": [0.1],
                 "stage_transport_loss": [0.2],
                 "stage_routing_stability_loss": [0.3],
+                "stage_support_projection_residual": [0.06],
+                "stage_effective_capacity_residual": [0.02],
+                "stage_support_density": [0.5],
             },
             "prototype_lifecycle": [
                 {
                     "reset_count": 1,
                     "split_count": 2,
                     "merge_count": 3,
+                    "mean_transport_gap": 0.1,
+                    "max_transport_gap": 0.2,
                 }
             ],
         }
@@ -140,6 +145,8 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
     assert "sinkhorn_topk" in table_text
     assert "kl_topk" in table_text
     assert "masked_sinkhorn_topk" in table_text
+    assert "Final Gap" in table_text
+    assert "Final Transport" in table_text
     assert "# Continual Operator Ablation Summary" in report_text
     assert "masked_sinkhorn_topk" in report_text
     assert "no_transport" in report_text

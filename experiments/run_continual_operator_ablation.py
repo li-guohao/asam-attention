@@ -158,6 +158,9 @@ def build_benchmark_args(args: OperatorAblationArgs, strategy: Dict[str, object]
 def summarize_result(name: str, strategy: Dict[str, object], result: Dict[str, object]) -> Dict[str, object]:
     theory = result.get("theory_diagnostics", {})
     lifecycle = result.get("prototype_lifecycle", [])
+    def last(series_name: str) -> float:
+        values = theory.get(series_name, [0.0]) or [0.0]
+        return float(values[-1])
     return {
         "strategy": name,
         "routing_strategy": str(result.get("config", {}).get("prototype_routing_strategy", strategy.get("prototype_routing_strategy", "sinkhorn_topk"))),
@@ -170,6 +173,15 @@ def summarize_result(name: str, strategy: Dict[str, object], result: Dict[str, o
         "final_transport_gap": float((theory.get("stage_transport_gap", [0.0]) or [0.0])[-1]),
         "final_transport_loss": float((theory.get("stage_transport_loss", [0.0]) or [0.0])[-1]),
         "final_routing_stability": float((theory.get("stage_routing_stability_loss", [0.0]) or [0.0])[-1]),
+        "final_candidate_support_residual": last("stage_candidate_support_residual"),
+        "final_support_projection_residual": last("stage_support_projection_residual"),
+        "final_support_residual_delta": last("stage_support_residual_delta"),
+        "final_effective_capacity_residual": last("stage_effective_capacity_residual"),
+        "final_support_density": last("stage_support_density"),
+        "final_support_size": last("stage_support_size"),
+        "final_support_active_prototypes": last("stage_support_active_prototypes"),
+        "final_support_weight_leakage": last("stage_support_weight_leakage"),
+        "final_capacity_bias_selection_rate": last("stage_capacity_bias_selection_rate"),
         "total_resets": sum(int(item.get("reset_count", 0)) for item in lifecycle),
         "total_splits": sum(int(item.get("split_count", 0)) for item in lifecycle),
         "total_merges": sum(int(item.get("merge_count", 0)) for item in lifecycle),
@@ -187,6 +199,15 @@ def aggregate_strategy_runs(strategy: Dict[str, object], rows: List[Dict[str, ob
     transport_gap_mean, transport_gap_std = mean_std("final_transport_gap")
     transport_loss_mean, transport_loss_std = mean_std("final_transport_loss")
     routing_stability_mean, routing_stability_std = mean_std("final_routing_stability")
+    candidate_support_mean, candidate_support_std = mean_std("final_candidate_support_residual")
+    support_projection_mean, support_projection_std = mean_std("final_support_projection_residual")
+    support_residual_delta_mean, support_residual_delta_std = mean_std("final_support_residual_delta")
+    effective_capacity_mean, effective_capacity_std = mean_std("final_effective_capacity_residual")
+    support_density_mean, support_density_std = mean_std("final_support_density")
+    support_size_mean, support_size_std = mean_std("final_support_size")
+    support_active_prototypes_mean, support_active_prototypes_std = mean_std("final_support_active_prototypes")
+    support_weight_leakage_mean, support_weight_leakage_std = mean_std("final_support_weight_leakage")
+    capacity_bias_selection_rate_mean, capacity_bias_selection_rate_std = mean_std("final_capacity_bias_selection_rate")
 
     return {
         "strategy": str(strategy["name"]),
@@ -207,17 +228,35 @@ def aggregate_strategy_runs(strategy: Dict[str, object], rows: List[Dict[str, ob
         "final_transport_loss_std": transport_loss_std,
         "final_routing_stability_mean": routing_stability_mean,
         "final_routing_stability_std": routing_stability_std,
+        "final_candidate_support_residual_mean": candidate_support_mean,
+        "final_candidate_support_residual_std": candidate_support_std,
+        "final_support_projection_residual_mean": support_projection_mean,
+        "final_support_projection_residual_std": support_projection_std,
+        "final_support_residual_delta_mean": support_residual_delta_mean,
+        "final_support_residual_delta_std": support_residual_delta_std,
+        "final_effective_capacity_residual_mean": effective_capacity_mean,
+        "final_effective_capacity_residual_std": effective_capacity_std,
+        "final_support_density_mean": support_density_mean,
+        "final_support_density_std": support_density_std,
+        "final_support_size_mean": support_size_mean,
+        "final_support_size_std": support_size_std,
+        "final_support_active_prototypes_mean": support_active_prototypes_mean,
+        "final_support_active_prototypes_std": support_active_prototypes_std,
+        "final_support_weight_leakage_mean": support_weight_leakage_mean,
+        "final_support_weight_leakage_std": support_weight_leakage_std,
+        "final_capacity_bias_selection_rate_mean": capacity_bias_selection_rate_mean,
+        "final_capacity_bias_selection_rate_std": capacity_bias_selection_rate_std,
     }
 
 
 def build_markdown_table(rows: List[Dict[str, object]]) -> str:
     lines = [
-        "| Strategy | Routing | Transport W | Merge Usage | Relocation | Accuracy (mean±std) | Forgetting (mean±std) | BWT (mean±std) | Final Gap (mean±std) | Final Transport (mean±std) | Runs |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Strategy | Routing | Transport W | Merge Usage | Relocation | Accuracy (mean±std) | Forgetting (mean±std) | BWT (mean±std) | Final Gap (mean±std) | Final Transport (mean±std) | Final Candidate Residual (mean±std) | Final Support Residual (mean±std) | Final Delta (mean±std) | Final Density (mean±std) | Runs |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         lines.append(
-            "| {strategy} | {routing_strategy} | {transport_weight:.2f} | {merge_usage_threshold:.2f} | {relocation_strength:.2f} | {avg_accuracy_mean:.4f}±{avg_accuracy_std:.4f} | {avg_forgetting_mean:.4f}±{avg_forgetting_std:.4f} | {backward_transfer_mean:.4f}±{backward_transfer_std:.4f} | {final_transport_gap_mean:.4f}±{final_transport_gap_std:.4f} | {final_transport_loss_mean:.4f}±{final_transport_loss_std:.4f} | {num_runs} |".format(**row)
+            "| {strategy} | {routing_strategy} | {transport_weight:.2f} | {merge_usage_threshold:.2f} | {relocation_strength:.2f} | {avg_accuracy_mean:.4f}±{avg_accuracy_std:.4f} | {avg_forgetting_mean:.4f}±{avg_forgetting_std:.4f} | {backward_transfer_mean:.4f}±{backward_transfer_std:.4f} | {final_transport_gap_mean:.4f}±{final_transport_gap_std:.4f} | {final_transport_loss_mean:.4f}±{final_transport_loss_std:.4f} | {final_candidate_support_residual_mean:.4f}±{final_candidate_support_residual_std:.4f} | {final_support_projection_residual_mean:.4f}±{final_support_projection_residual_std:.4f} | {final_support_residual_delta_mean:.4f}±{final_support_residual_delta_std:.4f} | {final_support_density_mean:.4f}±{final_support_density_std:.4f} | {num_runs} |".format(**row)
         )
     return "\n".join(lines)
 
@@ -242,6 +281,24 @@ def save_csv(rows: List[Dict[str, object]], path: Path):
         "final_transport_loss_std",
         "final_routing_stability_mean",
         "final_routing_stability_std",
+        "final_candidate_support_residual_mean",
+        "final_candidate_support_residual_std",
+        "final_support_projection_residual_mean",
+        "final_support_projection_residual_std",
+        "final_support_residual_delta_mean",
+        "final_support_residual_delta_std",
+        "final_effective_capacity_residual_mean",
+        "final_effective_capacity_residual_std",
+        "final_support_density_mean",
+        "final_support_density_std",
+        "final_support_size_mean",
+        "final_support_size_std",
+        "final_support_active_prototypes_mean",
+        "final_support_active_prototypes_std",
+        "final_support_weight_leakage_mean",
+        "final_support_weight_leakage_std",
+        "final_capacity_bias_selection_rate_mean",
+        "final_capacity_bias_selection_rate_std",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)

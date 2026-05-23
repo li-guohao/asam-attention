@@ -187,9 +187,25 @@ def test_prototype_continual_asam_forward_shapes():
     assert info["prototype_support"].shape == (3, 5)
     assert info["prototype_prior"].shape == (3, 5)
     assert info["prototype_capacity"].shape == (5,)
+    assert info["prototype_target_capacity"].shape == (5,)
     assert info["pattern_weights"].shape == (3, 4, 4)
     assert info["prototype_pattern_masks"].shape[:3] == (3, 4, 18)
     assert info["transport_loss_per_sample"].shape == (3,)
+    for key in [
+        "candidate_support_residual",
+        "support_projection_residual",
+        "support_residual_delta",
+        "target_capacity_residual",
+        "effective_capacity_residual",
+        "support_density",
+        "support_size",
+        "support_active_prototypes",
+        "support_weight_leakage",
+        "capacity_bias_selection_rate",
+    ]:
+        assert key in info
+        assert info[key].shape == ()
+        assert torch.isfinite(info[key])
     assert torch.all(info["prototype_support"].sum(dim=-1) <= config.prototype_top_k)
     assert torch.allclose(
         info["transport_loss_per_sample"].mean(),
@@ -311,12 +327,21 @@ def test_masked_sinkhorn_capacity_bias_selects_lower_residual_support():
 
     baseline_support = gate._build_masked_sinkhorn_support(logits)
     baseline_capacity = gate._project_capacity_to_support(target_capacity, baseline_support)
-    weights, support, selected_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+    weights, support, selected_capacity, diagnostics = gate._route_with_masked_sinkhorn(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
 
     baseline_residual = (baseline_capacity - target_capacity).abs().sum()
     selected_residual = (selected_capacity - target_capacity).abs().sum()
 
     assert selected_residual < baseline_residual
+    assert diagnostics["support_residual_delta"] > 0
+    assert torch.isclose(diagnostics["capacity_bias_selection_rate"], torch.tensor(1.0))
+    assert diagnostics["effective_capacity_residual"] < 1e-3
+    assert diagnostics["support_weight_leakage"] > 0.0
+    assert not diagnostics["support_weight_leakage"].requires_grad
     assert not torch.equal(support, baseline_support)
     assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
     assert torch.all(weights.masked_select(~support) == 0.0)
@@ -348,12 +373,18 @@ def test_masked_sinkhorn_capacity_bias_guard_keeps_baseline_when_biased_is_worse
     routing_prior = torch.tensor([[0.3064, 0.1764, 0.2977, 0.2196]] * logits.size(0))
     baseline_support = gate._build_masked_sinkhorn_support(logits)
 
-    _, support, selected_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+    _, support, selected_capacity, diagnostics = gate._route_with_masked_sinkhorn(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
     target_capacity = gate._build_capacity_target(routing_prior)
     baseline_capacity = gate._project_capacity_to_support(target_capacity, baseline_support)
 
     assert torch.equal(support, baseline_support)
     assert torch.allclose(selected_capacity, baseline_capacity, atol=1e-6)
+    assert torch.isclose(diagnostics["capacity_bias_selection_rate"], torch.tensor(0.0))
+    assert diagnostics["support_residual_delta"] >= -1e-6
 
 
 def test_masked_sinkhorn_zero_capacity_bias_keeps_logits_topk_support():
@@ -373,9 +404,15 @@ def test_masked_sinkhorn_zero_capacity_bias_keeps_logits_topk_support():
     logits = torch.tensor([[0.0, 0.35, 0.25, -1.0]] * 4)
     routing_prior = torch.tensor([[0.55, 0.15, 0.15, 0.15]] * 4)
 
-    _, support, _ = gate._route_with_masked_sinkhorn(logits, routing_prior)
+    _, support, _, diagnostics = gate._route_with_masked_sinkhorn(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
 
     assert torch.equal(support, gate._build_masked_sinkhorn_support(logits))
+    assert torch.isclose(diagnostics["capacity_bias_selection_rate"], torch.tensor(0.0))
+    assert abs(float(diagnostics["support_residual_delta"])) < 1e-6
 
 
 def test_masked_sinkhorn_reduces_capacity_violation_vs_dense_then_projected_topk():
@@ -586,6 +623,9 @@ def test_prototype_layer_accepts_masked_sinkhorn_strategy():
     assert torch.allclose(info["prototype_weights"].sum(dim=-1), torch.ones(3), atol=1e-5)
     assert torch.all(info["prototype_weights"].masked_select(~info["prototype_support"]) == 0.0)
     assert torch.isfinite(info["transport_loss"])
+    assert not info["support_projection_residual"].requires_grad
+    assert not info["effective_capacity_residual"].requires_grad
+    assert not info["support_weight_leakage"].requires_grad
 
 
 def test_prototype_layer_propagates_masked_sinkhorn_capacity_bias():
