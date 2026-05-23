@@ -48,6 +48,7 @@ class ContinualASAMConfig(ASAMConfig):
     prototype_sinkhorn_epsilon: float = 0.1
     prototype_sinkhorn_iters: int = 20
     prototype_capacity_blend: float = 0.5
+    prototype_masked_sinkhorn_candidate_k: int = 0
     prototype_relocation_strength: float = 0.75
     prototype_balance_weight: float = 0.0
     prototype_diversity_weight: float = 0.0
@@ -132,6 +133,7 @@ class PrototypeSparseGate(nn.Module):
         sinkhorn_epsilon: float = 0.1,
         sinkhorn_iters: int = 20,
         capacity_blend: float = 0.5,
+        masked_sinkhorn_candidate_k: int = 0,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -145,6 +147,7 @@ class PrototypeSparseGate(nn.Module):
         self.sinkhorn_epsilon = sinkhorn_epsilon
         self.sinkhorn_iters = sinkhorn_iters
         self.capacity_blend = capacity_blend
+        self.masked_sinkhorn_candidate_k = masked_sinkhorn_candidate_k
 
         self.input_proj = nn.Linear(dim, prototype_embed_dim)
         self.prototype_embeddings = nn.Parameter(torch.randn(num_prototypes, prototype_embed_dim) * 0.02)
@@ -227,6 +230,23 @@ class PrototypeSparseGate(nn.Module):
         target = blend * average_prior + (1.0 - blend) * uniform
         return target / target.sum().clamp_min(1e-6)
 
+    def _project_capacity_to_support(
+        self,
+        target_capacity: torch.Tensor,
+        support: torch.Tensor,
+    ) -> torch.Tensor:
+        support_weights = support.to(dtype=target_capacity.dtype)
+        target_on_support = support_weights * target_capacity.unsqueeze(0)
+        row_target_mass = target_on_support.sum(dim=-1, keepdim=True)
+        fallback = support_weights / support_weights.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        row_distribution = torch.where(
+            row_target_mass > 1e-6,
+            target_on_support / row_target_mass.clamp_min(1e-6),
+            fallback,
+        )
+        capacity = row_distribution.mean(dim=0)
+        return capacity / capacity.sum().clamp_min(1e-6)
+
     def _sinkhorn_transport_weights(
         self,
         logits: torch.Tensor,
@@ -262,6 +282,82 @@ class PrototypeSparseGate(nn.Module):
         sparse_weights, support = self._topk_project_probabilities(dense_weights)
         return sparse_weights, support, target_capacity
 
+    def _build_masked_sinkhorn_support(
+        self,
+        logits: torch.Tensor,
+    ) -> torch.Tensor:
+        candidate_k = int(self.masked_sinkhorn_candidate_k)
+        if candidate_k <= 0:
+            candidate_k = self.top_k
+        candidate_k = min(max(1, candidate_k), logits.size(-1))
+        if candidate_k >= logits.size(-1):
+            return torch.ones_like(logits, dtype=torch.bool)
+
+        _, top_indices = logits.topk(k=candidate_k, dim=-1)
+        support = torch.zeros_like(logits, dtype=torch.bool)
+        support.scatter_(
+            dim=-1,
+            index=top_indices,
+            src=torch.ones(top_indices.shape, device=logits.device, dtype=torch.bool),
+        )
+        return support
+
+    def _masked_sinkhorn_transport_weights(
+        self,
+        logits: torch.Tensor,
+        target_capacity: torch.Tensor,
+        support: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size = logits.size(0)
+        row_mass = torch.full(
+            (batch_size,),
+            1.0 / batch_size,
+            device=logits.device,
+            dtype=logits.dtype,
+        )
+        col_mass = target_capacity.to(device=logits.device, dtype=logits.dtype)
+        col_mass = col_mass / col_mass.sum().clamp_min(1e-6)
+
+        scaled_logits = logits / max(self.sinkhorn_epsilon, 1e-6)
+        scaled_logits = scaled_logits.masked_fill(~support, float("-inf"))
+        row_max = scaled_logits.max(dim=-1, keepdim=True).values
+        row_max = torch.where(torch.isfinite(row_max), row_max, torch.zeros_like(row_max))
+        kernel = torch.exp(scaled_logits - row_max).masked_fill(~support, 0.0)
+        kernel = kernel.clamp_min(0.0)
+
+        u = torch.ones_like(row_mass)
+        v = torch.ones_like(col_mass)
+        for _ in range(max(1, self.sinkhorn_iters)):
+            u = row_mass / torch.matmul(kernel, v).clamp_min(1e-9)
+            v = col_mass / torch.matmul(kernel.transpose(0, 1), u).clamp_min(1e-9)
+
+        transport = u.unsqueeze(-1) * kernel * v.unsqueeze(0)
+        weights = transport / transport.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        weights = weights.masked_fill(~support, 0.0)
+        return weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+
+    def _route_with_masked_sinkhorn(
+        self,
+        logits: torch.Tensor,
+        routing_prior: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        target_capacity = self._build_capacity_target(routing_prior)
+        candidate_k = int(self.masked_sinkhorn_candidate_k)
+        if candidate_k <= 0:
+            candidate_k = self.top_k
+        if min(max(1, candidate_k), logits.size(-1)) >= logits.size(-1):
+            return self._route_with_sinkhorn(logits, routing_prior)
+
+        support = self._build_masked_sinkhorn_support(logits)
+        effective_capacity = self._project_capacity_to_support(target_capacity, support)
+
+        weights = self._masked_sinkhorn_transport_weights(
+            logits=logits,
+            target_capacity=effective_capacity,
+            support=support,
+        )
+        return weights, support, effective_capacity
+
     def forward(
         self,
         x: torch.Tensor,
@@ -284,6 +380,11 @@ class PrototypeSparseGate(nn.Module):
         )
         if self.routing_strategy == "sinkhorn_topk":
             prototype_weights, prototype_support, prototype_capacity = self._route_with_sinkhorn(
+                proximal_logits,
+                routing_prior,
+            )
+        elif self.routing_strategy == "masked_sinkhorn_topk":
+            prototype_weights, prototype_support, prototype_capacity = self._route_with_masked_sinkhorn(
                 proximal_logits,
                 routing_prior,
             )
@@ -711,6 +812,7 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             sinkhorn_epsilon=config.prototype_sinkhorn_epsilon,
             sinkhorn_iters=config.prototype_sinkhorn_iters,
             capacity_blend=config.prototype_capacity_blend,
+            masked_sinkhorn_candidate_k=config.prototype_masked_sinkhorn_candidate_k,
         )
         self.register_buffer("prototype_head_memory", torch.zeros(config.num_prototypes, config.num_heads))
         self.register_buffer(
