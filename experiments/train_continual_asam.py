@@ -151,6 +151,8 @@ class ContinualTextClassifier(nn.Module):
         prototype_noise_scale: float = 0.05,
         prototype_merge_threshold: float = 0.9,
         prototype_merge_usage_threshold: float = 0.1,
+        prototype_masked_sinkhorn_candidate_k: int = 0,
+        prototype_masked_sinkhorn_capacity_bias: float = 0.0,
         prototype_birkhoff_transport_strength: float = 0.02,
         prototype_birkhoff_adaptive_gate: bool = True,
         prototype_birkhoff_gap_target: float = 0.03,
@@ -191,6 +193,8 @@ class ContinualTextClassifier(nn.Module):
             prototype_noise_scale=prototype_noise_scale,
             prototype_merge_threshold=prototype_merge_threshold,
             prototype_merge_usage_threshold=prototype_merge_usage_threshold,
+            prototype_masked_sinkhorn_candidate_k=prototype_masked_sinkhorn_candidate_k,
+            prototype_masked_sinkhorn_capacity_bias=prototype_masked_sinkhorn_capacity_bias,
             prototype_birkhoff_transport_strength=prototype_birkhoff_transport_strength,
             prototype_birkhoff_adaptive_gate=prototype_birkhoff_adaptive_gate,
             prototype_birkhoff_gap_target=prototype_birkhoff_gap_target,
@@ -367,6 +371,7 @@ class ContinualTextClassifier(nn.Module):
             return {
                 "prototype_prior_strength": 0.0,
                 "prototype_capacity_blend": 0.0,
+                "prototype_masked_sinkhorn_capacity_bias": 0.0,
                 "prototype_relocation_strength": 0.0,
                 "prototype_merge_threshold": 0.0,
                 "prototype_merge_usage_threshold": 0.0,
@@ -378,6 +383,10 @@ class ContinualTextClassifier(nn.Module):
             ),
             "prototype_capacity_blend": float(
                 sum(layer.prototype_gate.capacity_blend for layer in prototype_layers) / len(prototype_layers)
+            ),
+            "prototype_masked_sinkhorn_capacity_bias": float(
+                sum(layer.prototype_gate.masked_sinkhorn_capacity_bias for layer in prototype_layers)
+                / len(prototype_layers)
             ),
             "prototype_relocation_strength": float(
                 sum(layer.continual_config.prototype_relocation_strength for layer in prototype_layers)
@@ -401,6 +410,7 @@ class ContinualTextClassifier(nn.Module):
         self,
         prototype_prior_strength: Optional[float] = None,
         prototype_capacity_blend: Optional[float] = None,
+        prototype_masked_sinkhorn_capacity_bias: Optional[float] = None,
         prototype_relocation_strength: Optional[float] = None,
         prototype_merge_threshold: Optional[float] = None,
         prototype_merge_usage_threshold: Optional[float] = None,
@@ -416,6 +426,10 @@ class ContinualTextClassifier(nn.Module):
                 clipped_blend = float(min(max(prototype_capacity_blend, 0.0), 1.0))
                 layer.prototype_gate.capacity_blend = clipped_blend
                 layer.continual_config.prototype_capacity_blend = clipped_blend
+            if prototype_masked_sinkhorn_capacity_bias is not None:
+                clipped_bias = float(max(prototype_masked_sinkhorn_capacity_bias, 0.0))
+                layer.prototype_gate.masked_sinkhorn_capacity_bias = clipped_bias
+                layer.continual_config.prototype_masked_sinkhorn_capacity_bias = clipped_bias
             if prototype_relocation_strength is not None:
                 clipped_relocation = float(min(max(prototype_relocation_strength, 0.0), 1.0))
                 layer.continual_config.prototype_relocation_strength = clipped_relocation
@@ -466,6 +480,8 @@ class ExperimentArgs:
     prototype_noise_scale: float = 0.05
     prototype_merge_threshold: float = 0.9
     prototype_merge_usage_threshold: float = 0.1
+    prototype_masked_sinkhorn_candidate_k: int = 0
+    prototype_masked_sinkhorn_capacity_bias: float = 0.0
     prototype_birkhoff_transport_strength: float = 0.02
     prototype_birkhoff_adaptive_gate: bool = True
     prototype_birkhoff_gap_target: float = 0.03
@@ -766,6 +782,8 @@ def run_experiment(args: ExperimentArgs) -> Dict[str, object]:
         prototype_noise_scale=args.prototype_noise_scale,
         prototype_merge_threshold=args.prototype_merge_threshold,
         prototype_merge_usage_threshold=args.prototype_merge_usage_threshold,
+        prototype_masked_sinkhorn_candidate_k=args.prototype_masked_sinkhorn_candidate_k,
+        prototype_masked_sinkhorn_capacity_bias=args.prototype_masked_sinkhorn_capacity_bias,
         prototype_birkhoff_transport_strength=args.prototype_birkhoff_transport_strength,
         prototype_birkhoff_adaptive_gate=args.prototype_birkhoff_adaptive_gate,
         prototype_birkhoff_gap_target=args.prototype_birkhoff_gap_target,
@@ -778,6 +796,7 @@ def run_experiment(args: ExperimentArgs) -> Dict[str, object]:
         model.set_prototype_hyperparameters(
             prototype_prior_strength=args.prototype_prior_strength,
             prototype_capacity_blend=args.prototype_capacity_blend,
+            prototype_masked_sinkhorn_capacity_bias=args.prototype_masked_sinkhorn_capacity_bias,
             prototype_relocation_strength=args.prototype_relocation_strength,
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)

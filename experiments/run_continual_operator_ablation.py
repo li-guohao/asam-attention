@@ -50,6 +50,8 @@ class OperatorAblationArgs:
     prototype_noise_scale: float = 0.05
     prototype_merge_threshold: float = 0.9
     prototype_merge_usage_threshold: float = 0.1
+    prototype_masked_sinkhorn_candidate_k: int = 0
+    prototype_masked_sinkhorn_capacity_bias: float = 0.0
     prototype_prior_strength: float = 1.0
     prototype_capacity_blend: float = 0.5
     prototype_relocation_strength: float = 0.75
@@ -70,6 +72,13 @@ OPERATOR_STRATEGIES = [
     {
         "name": "kl_topk",
         "prototype_routing_strategy": "kl_topk",
+        "transport_weight": 0.05,
+        "prototype_merge_usage_threshold": 0.1,
+        "prototype_relocation_strength": 0.75,
+    },
+    {
+        "name": "masked_sinkhorn_topk",
+        "prototype_routing_strategy": "masked_sinkhorn_topk",
         "transport_weight": 0.05,
         "prototype_merge_usage_threshold": 0.1,
         "prototype_relocation_strength": 0.75,
@@ -129,6 +138,12 @@ def build_benchmark_args(args: OperatorAblationArgs, strategy: Dict[str, object]
         prototype_noise_scale=args.prototype_noise_scale,
         prototype_merge_threshold=args.prototype_merge_threshold,
         prototype_merge_usage_threshold=float(strategy.get("prototype_merge_usage_threshold", args.prototype_merge_usage_threshold)),
+        prototype_masked_sinkhorn_candidate_k=int(
+            strategy.get("prototype_masked_sinkhorn_candidate_k", args.prototype_masked_sinkhorn_candidate_k)
+        ),
+        prototype_masked_sinkhorn_capacity_bias=float(
+            strategy.get("prototype_masked_sinkhorn_capacity_bias", args.prototype_masked_sinkhorn_capacity_bias)
+        ),
         prototype_prior_strength=args.prototype_prior_strength,
         prototype_capacity_blend=args.prototype_capacity_blend,
         prototype_relocation_strength=float(strategy.get("prototype_relocation_strength", args.prototype_relocation_strength)),
@@ -282,6 +297,7 @@ def build_report(summary: Dict[str, object]) -> str:
         "",
         "- `sinkhorn_topk` is the full capacity-aware routing baseline.",
         "- `kl_topk` removes Sinkhorn balancing while keeping sparse prototype routing.",
+        "- `masked_sinkhorn_topk` runs Sinkhorn directly on the sparse top-k support.",
         "- `no_transport` disables the transport-loss training term.",
         "- `no_merge` disables merge events through `prototype_merge_usage_threshold=0`.",
         "- `no_relocation` disables relocation updates through `prototype_relocation_strength=0`.",

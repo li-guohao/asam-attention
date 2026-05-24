@@ -73,6 +73,7 @@ class RealBenchmarkArgs:
     prototype_noise_scale: float = 0.05
     prototype_merge_threshold: float = 0.9
     prototype_merge_usage_threshold: float = 0.1
+    prototype_masked_sinkhorn_candidate_k: int = 0
     prototype_birkhoff_transport_strength: float = 0.02
     prototype_birkhoff_adaptive_gate: bool = True
     prototype_birkhoff_gap_target: float = 0.03
@@ -81,6 +82,7 @@ class RealBenchmarkArgs:
     prototype_birkhoff_min_effective_strength: float = 1e-4
     prototype_prior_strength: float = 1.0
     prototype_capacity_blend: float = 0.5
+    prototype_masked_sinkhorn_capacity_bias: float = 0.0
     prototype_relocation_strength: float = 0.75
     adaptive_hyperparameters: bool = True
     adaptation_strategy: str = "meta_secant"
@@ -833,6 +835,8 @@ def run_benchmark(args: RealBenchmarkArgs) -> Dict[str, object]:
         prototype_noise_scale=args.prototype_noise_scale,
         prototype_merge_threshold=args.prototype_merge_threshold,
         prototype_merge_usage_threshold=args.prototype_merge_usage_threshold,
+        prototype_masked_sinkhorn_candidate_k=args.prototype_masked_sinkhorn_candidate_k,
+        prototype_masked_sinkhorn_capacity_bias=args.prototype_masked_sinkhorn_capacity_bias,
         prototype_birkhoff_transport_strength=args.prototype_birkhoff_transport_strength,
         prototype_birkhoff_adaptive_gate=args.prototype_birkhoff_adaptive_gate,
         prototype_birkhoff_gap_target=args.prototype_birkhoff_gap_target,
@@ -843,6 +847,7 @@ def run_benchmark(args: RealBenchmarkArgs) -> Dict[str, object]:
     model.set_prototype_hyperparameters(
         prototype_prior_strength=args.prototype_prior_strength,
         prototype_capacity_blend=args.prototype_capacity_blend,
+        prototype_masked_sinkhorn_capacity_bias=args.prototype_masked_sinkhorn_capacity_bias,
         prototype_relocation_strength=args.prototype_relocation_strength,
     )
     if args.adaptation_strategy == "dual_transport" and hasattr(model, "set_task_transport_weights"):
