@@ -49,6 +49,7 @@ class ContinualASAMConfig(ASAMConfig):
     prototype_sinkhorn_iters: int = 20
     prototype_capacity_blend: float = 0.5
     prototype_masked_sinkhorn_candidate_k: int = 0
+    prototype_masked_sinkhorn_capacity_bias: float = 0.0
     prototype_relocation_strength: float = 0.75
     prototype_balance_weight: float = 0.0
     prototype_diversity_weight: float = 0.0
@@ -134,6 +135,7 @@ class PrototypeSparseGate(nn.Module):
         sinkhorn_iters: int = 20,
         capacity_blend: float = 0.5,
         masked_sinkhorn_candidate_k: int = 0,
+        masked_sinkhorn_capacity_bias: float = 0.0,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -148,6 +150,7 @@ class PrototypeSparseGate(nn.Module):
         self.sinkhorn_iters = sinkhorn_iters
         self.capacity_blend = capacity_blend
         self.masked_sinkhorn_candidate_k = masked_sinkhorn_candidate_k
+        self.masked_sinkhorn_capacity_bias = masked_sinkhorn_capacity_bias
 
         self.input_proj = nn.Linear(dim, prototype_embed_dim)
         self.prototype_embeddings = nn.Parameter(torch.randn(num_prototypes, prototype_embed_dim) * 0.02)
@@ -282,25 +285,54 @@ class PrototypeSparseGate(nn.Module):
         sparse_weights, support = self._topk_project_probabilities(dense_weights)
         return sparse_weights, support, target_capacity
 
-    def _build_masked_sinkhorn_support(
+    def _topk_support_from_scores(
         self,
-        logits: torch.Tensor,
+        scores: torch.Tensor,
     ) -> torch.Tensor:
         candidate_k = int(self.masked_sinkhorn_candidate_k)
         if candidate_k <= 0:
             candidate_k = self.top_k
-        candidate_k = min(max(1, candidate_k), logits.size(-1))
-        if candidate_k >= logits.size(-1):
-            return torch.ones_like(logits, dtype=torch.bool)
+        candidate_k = min(max(1, candidate_k), scores.size(-1))
+        if candidate_k >= scores.size(-1):
+            return torch.ones_like(scores, dtype=torch.bool)
 
-        _, top_indices = logits.topk(k=candidate_k, dim=-1)
-        support = torch.zeros_like(logits, dtype=torch.bool)
+        _, top_indices = scores.topk(k=candidate_k, dim=-1)
+        support = torch.zeros_like(scores, dtype=torch.bool)
         support.scatter_(
             dim=-1,
             index=top_indices,
-            src=torch.ones(top_indices.shape, device=logits.device, dtype=torch.bool),
+            src=torch.ones(top_indices.shape, device=scores.device, dtype=torch.bool),
         )
         return support
+
+    def _build_masked_sinkhorn_support(
+        self,
+        logits: torch.Tensor,
+    ) -> torch.Tensor:
+        return self._topk_support_from_scores(logits)
+
+    def _select_masked_sinkhorn_support(
+        self,
+        logits: torch.Tensor,
+        target_capacity: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        baseline_support = self._build_masked_sinkhorn_support(logits)
+        baseline_capacity = self._project_capacity_to_support(target_capacity, baseline_support)
+        beta = float(self.masked_sinkhorn_capacity_bias)
+        if beta <= 0.0:
+            return baseline_support, baseline_capacity
+
+        capacity_scores = logits + beta * torch.log(
+            target_capacity.to(device=logits.device, dtype=logits.dtype).clamp_min(self.prior_floor)
+        ).unsqueeze(0)
+        biased_support = self._topk_support_from_scores(capacity_scores)
+        biased_capacity = self._project_capacity_to_support(target_capacity, biased_support)
+
+        baseline_residual = (baseline_capacity - target_capacity).abs().sum()
+        biased_residual = (biased_capacity - target_capacity).abs().sum()
+        if biased_residual.item() < baseline_residual.item():
+            return biased_support, biased_capacity
+        return baseline_support, baseline_capacity
 
     def _masked_sinkhorn_transport_weights(
         self,
@@ -348,8 +380,7 @@ class PrototypeSparseGate(nn.Module):
         if min(max(1, candidate_k), logits.size(-1)) >= logits.size(-1):
             return self._route_with_sinkhorn(logits, routing_prior)
 
-        support = self._build_masked_sinkhorn_support(logits)
-        effective_capacity = self._project_capacity_to_support(target_capacity, support)
+        support, effective_capacity = self._select_masked_sinkhorn_support(logits, target_capacity)
 
         weights = self._masked_sinkhorn_transport_weights(
             logits=logits,
@@ -813,6 +844,7 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             sinkhorn_iters=config.prototype_sinkhorn_iters,
             capacity_blend=config.prototype_capacity_blend,
             masked_sinkhorn_candidate_k=config.prototype_masked_sinkhorn_candidate_k,
+            masked_sinkhorn_capacity_bias=config.prototype_masked_sinkhorn_capacity_bias,
         )
         self.register_buffer("prototype_head_memory", torch.zeros(config.num_prototypes, config.num_heads))
         self.register_buffer(
