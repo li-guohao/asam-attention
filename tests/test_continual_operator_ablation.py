@@ -23,6 +23,8 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
         benchmark_calls.append(benchmark_args)
         if benchmark_args.output_json is not None:
             Path(benchmark_args.output_json).write_text("{}", encoding="utf-8")
+        assert benchmark_args.prototype_masked_sinkhorn_candidate_k in {5, 7}
+        assert benchmark_args.prototype_masked_sinkhorn_capacity_bias in {0.25, 0.75}
         strategy_scores = {
             "sinkhorn_topk": 0.60,
             "masked_sinkhorn_topk": 0.65,
@@ -64,6 +66,8 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
                 "transport_weight": 0.05,
                 "prototype_merge_usage_threshold": 0.1,
                 "prototype_relocation_strength": 0.75,
+                "prototype_masked_sinkhorn_candidate_k": 5,
+                "prototype_masked_sinkhorn_capacity_bias": 0.25,
             },
             {
                 "name": "masked_sinkhorn_topk",
@@ -71,6 +75,8 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
                 "transport_weight": 0.05,
                 "prototype_merge_usage_threshold": 0.1,
                 "prototype_relocation_strength": 0.75,
+                "prototype_masked_sinkhorn_candidate_k": 7,
+                "prototype_masked_sinkhorn_capacity_bias": 0.75,
             },
             {
                 "name": "kl_topk",
@@ -93,6 +99,8 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
         epochs_per_task=1,
         num_seeds=1,
         output_json=str(output_json),
+        prototype_masked_sinkhorn_candidate_k=5,
+        prototype_masked_sinkhorn_capacity_bias=0.25,
     )
 
     results = run_operator_ablation(args)
@@ -105,6 +113,8 @@ def test_continual_operator_ablation_runner_exports_summary_table(tmp_path, monk
         "masked_sinkhorn_topk",
         "kl_topk",
     ]
+    assert [call.prototype_masked_sinkhorn_candidate_k for call in benchmark_calls] == [5, 7, 5]
+    assert [call.prototype_masked_sinkhorn_capacity_bias for call in benchmark_calls] == [0.25, 0.75, 0.25]
     assert {row["strategy"] for row in results["aggregated_strategies"]} == {
         "sinkhorn_topk",
         "kl_topk",
