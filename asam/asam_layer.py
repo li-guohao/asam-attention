@@ -5,46 +5,48 @@ ASAM Layer - Adaptive Sparse Attention Mechanism
 The main ASAM implementation combining all innovations.
 """
 
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass
-from typing import Optional, Tuple, Dict
 
-from .sparse_patterns import (
-    LocalSparsePattern,
-    StridedSparsePattern, 
-    RandomSparsePattern,
-    ClusteredSparsePattern,
-    HierarchicalSparsePattern
+from ._common import (
+    expand_pattern_mask,
+    gather_values_by_positions,
+    normalize_attention_mask,
+    pattern_mask_to_indices,
 )
 from .adaptive_gate import DynamicSparseDenseAttention
-from ._common import (
-    normalize_attention_mask,
-    gather_values_by_positions,
-    expand_pattern_mask,
-    pattern_mask_to_indices,
+from .sparse_patterns import (
+    ClusteredSparsePattern,
+    HierarchicalSparsePattern,
+    LocalSparsePattern,
+    RandomSparsePattern,
+    StridedSparsePattern,
 )
 
 
 @dataclass
 class ASAMConfig:
     """Configuration for ASAM Layer."""
+
     dim: int = 512
     num_heads: int = 8
     dim_head: int = 64
     dropout: float = 0.1
-    
+
     # Sparse pattern configuration
     pattern_type: str = "hierarchical"  # local, strided, random, clustered, hierarchical
     window_size: int = 128
     stride: int = 32
     num_clusters: int = 32
-    
+
     # Adaptive gating
     use_adaptive_gate: bool = True
     gate_hidden_dim: int = 128
-    
+
     # Computational efficiency
     use_gradient_checkpointing: bool = False
 
@@ -52,47 +54,47 @@ class ASAMConfig:
 class ASAMLayer(nn.Module):
     """
     Adaptive Sparse Attention Mechanism (ASAM) Layer.
-    
+
     This is the main implementation that combines:
     1. Multiple sparse attention patterns
     2. Adaptive gating between sparse and dense attention
     3. Learnable pattern selection
     4. Efficient long-sequence processing
-    
+
     Original Contributions:
     - Dynamic cluster-based sparse attention
     - Hierarchical multi-scale sparse patterns
     - Differentiable sparse-dense switching
     - Input-dependent pattern selection
-    
+
     Performance Characteristics:
     - Memory: O(n * sqrt(n)) to O(n * log n) depending on pattern
     - Computation: Significantly reduced FLOPs for long sequences
     - Quality: Maintains >95% of full attention quality on most tasks
     """
-    
+
     def __init__(self, config: ASAMConfig):
         super().__init__()
         self.config = config
         self.dim = config.dim
         self.num_heads = config.num_heads
         self.dim_head = config.dim_head
-        self.scale = config.dim_head ** -0.5
-        
+        self.scale = config.dim_head**-0.5
+
         inner_dim = config.dim_head * config.num_heads
-        
+
         # Q, K, V projections
         self.to_qkv = nn.Linear(config.dim, inner_dim * 3, bias=False)
-        
+
         # Output projection
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, config.dim),
             nn.Dropout(config.dropout),
         )
-        
+
         # Layer normalization (pre-norm)
         self.norm = nn.LayerNorm(config.dim)
-        
+
         # Feed-forward network
         self.ffn = nn.Sequential(
             nn.Linear(config.dim, config.dim * 4),
@@ -102,7 +104,7 @@ class ASAMLayer(nn.Module):
             nn.Dropout(config.dropout),
         )
         self.ffn_norm = nn.LayerNorm(config.dim)
-        
+
         # Adaptive attention mechanism
         if config.use_adaptive_gate:
             self.adaptive_attn = DynamicSparseDenseAttention(
@@ -113,16 +115,16 @@ class ASAMLayer(nn.Module):
             )
         else:
             self.adaptive_attn = None
-        
+
         # Sparse patterns (initialized lazily)
         self._sparse_patterns = {}
         self._pattern_modules = nn.ModuleDict()
         self._pattern_index_cache = {}
-        
+
     def _get_pattern(self, seq_len: int, device: torch.device):
         """Get or create sparse pattern for given sequence length."""
         key = f"{self.config.pattern_type}_{seq_len}"
-        
+
         if key not in self._sparse_patterns:
             if self.config.pattern_type == "local":
                 pattern = LocalSparsePattern(seq_len, self.config.window_size)
@@ -132,37 +134,34 @@ class ASAMLayer(nn.Module):
                 pattern = RandomSparsePattern(seq_len, num_heads=self.config.num_heads)
             elif self.config.pattern_type == "clustered":
                 pattern = ClusteredSparsePattern(
-                    seq_len, 
-                    self.config.num_clusters,
-                    self.config.num_heads,
-                    self.config.dim_head
+                    seq_len, self.config.num_clusters, self.config.num_heads, self.config.dim_head
                 )
             elif self.config.pattern_type == "hierarchical":
                 pattern = HierarchicalSparsePattern(seq_len, num_heads=self.config.num_heads)
             else:
                 raise ValueError(f"Unknown pattern type: {self.config.pattern_type}")
-            
+
             self._pattern_modules[key] = pattern
             self._sparse_patterns[key] = pattern
-        
+
         return self._sparse_patterns[key]
-    
+
     def _compute_sparse_attention(
         self,
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
         pattern,
-        mask: Optional[torch.Tensor] = None
+        mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Compute sparse attention based on pattern.
-        
+
         Args:
             q, k, v: [batch, heads, seq_len, dim_head]
             pattern: SparsePattern instance
             mask: Optional mask
-            
+
         Returns:
             Output: [batch, heads, seq_len, dim_head]
         """
@@ -195,7 +194,7 @@ class ASAMLayer(nn.Module):
 
         # Apply additional mask if provided
         if normalized_mask is not None:
-            attn_scores = attn_scores.masked_fill(~normalized_mask, float('-inf'))
+            attn_scores = attn_scores.masked_fill(~normalized_mask, float("-inf"))
 
         # Softmax and apply to values
         attn_weights = F.softmax(attn_scores, dim=-1)
@@ -228,7 +227,7 @@ class ASAMLayer(nn.Module):
             gathered_mask = mask.gather(-1, gather_index)
             combined_mask = combined_mask & gathered_mask
 
-        scores = scores.masked_fill(~combined_mask, float('-inf'))
+        scores = scores.masked_fill(~combined_mask, float("-inf"))
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
 
@@ -256,31 +255,28 @@ class ASAMLayer(nn.Module):
         return cached_value
 
     def forward(
-        self, 
-        x: torch.Tensor, 
-        mask: Optional[torch.Tensor] = None,
-        return_info: bool = False
+        self, x: torch.Tensor, mask: Optional[torch.Tensor] = None, return_info: bool = False
     ) -> Tuple[torch.Tensor, Optional[Dict]]:
         """
         Forward pass through ASAM layer.
-        
+
         Args:
             x: Input tensor [batch, seq_len, dim]
             mask: Optional attention mask
             return_info: Whether to return gating information
-            
+
         Returns:
             output: [batch, seq_len, dim]
             info: Optional dict with attention statistics
         """
         batch, seq_len, dim = x.shape
-        
+
         # Pre-norm
         residual = x
         x = self.norm(x)
-        
+
         info = {}
-        
+
         # Attention
         if self.adaptive_attn is not None:
             # Use adaptive sparse-dense attention
@@ -293,26 +289,26 @@ class ASAMLayer(nn.Module):
             qkv = self.to_qkv(x).chunk(3, dim=-1)
             q, k, v = map(
                 lambda t: t.reshape(batch, seq_len, self.num_heads, self.dim_head).transpose(1, 2),
-                qkv
+                qkv,
             )
             q = q * self.scale
-            
+
             pattern = self._get_pattern(seq_len, x.device)
             attn_out = self._compute_sparse_attention(q, k, v, pattern, mask)
-            
+
             # Reshape and project
             attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, -1)
             attn_out = self.to_out(attn_out)
-        
+
         # Residual connection
         x = residual + attn_out
-        
+
         # FFN
         residual = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
         x = residual + x
-        
+
         if return_info:
             return x, info
         return x, None
@@ -322,38 +318,33 @@ class ASAMEncoder(nn.Module):
     """
     Multi-layer ASAM encoder.
     """
-    
+
     def __init__(self, config: ASAMConfig, num_layers: int = 6):
         super().__init__()
-        self.layers = nn.ModuleList([
-            ASAMLayer(config) for _ in range(num_layers)
-        ])
+        self.layers = nn.ModuleList([ASAMLayer(config) for _ in range(num_layers)])
         self.norm = nn.LayerNorm(config.dim)
-    
+
     def forward(
-        self, 
-        x: torch.Tensor, 
-        mask: Optional[torch.Tensor] = None,
-        return_all_layers: bool = False
+        self, x: torch.Tensor, mask: Optional[torch.Tensor] = None, return_all_layers: bool = False
     ):
         """
         Args:
             x: [batch, seq_len, dim]
             mask: Optional mask
             return_all_layers: Whether to return all layer outputs
-            
+
         Returns:
             output: [batch, seq_len, dim] or list of such tensors
         """
         all_outputs = []
-        
+
         for layer in self.layers:
             x, _ = layer(x, mask)
             if return_all_layers:
                 all_outputs.append(x)
-        
+
         x = self.norm(x)
-        
+
         if return_all_layers:
             return all_outputs
         return x

@@ -6,11 +6,12 @@ Supports DDP (DistributedDataParallel) wrapping with minimal boilerplate.
 from __future__ import annotations
 
 import os
+from typing import Callable, Optional
+
 import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
-from typing import Optional, Callable
 
 
 class DistributedTrainer:
@@ -102,11 +103,7 @@ class DistributedTrainer:
         if not self.is_main_process():
             return
 
-        model_state = (
-            model.module.state_dict()
-            if isinstance(model, DDP)
-            else model.state_dict()
-        )
+        model_state = model.module.state_dict() if isinstance(model, DDP) else model.state_dict()
 
         checkpoint = {
             "model_state_dict": model_state,
