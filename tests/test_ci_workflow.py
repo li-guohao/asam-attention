@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 WORKFLOW_DIR = Path(".github/workflows")
 CI_WORKFLOW = WORKFLOW_DIR / "tests.yml"
 NIGHTLY_WORKFLOW = WORKFLOW_DIR / "nightly.yml"
@@ -38,7 +37,9 @@ def test_ci_workflow_runs_fast_gating_tests_not_full_suite():
 
     assert "pytest -q \\" in workflow
     assert "tests/test_basic.py" in workflow
-    assert "tests/test_continual_asam.py::test_sinkhorn_transport_matches_capacity_target" in workflow
+    assert (
+        "tests/test_continual_asam.py::test_sinkhorn_transport_matches_capacity_target" in workflow
+    )
     assert (
         "tests/test_continual_ablation.py::test_build_benchmark_args_forwards_transport_weight_override"
         in workflow
@@ -57,7 +58,13 @@ def test_ci_workflow_installs_plotting_dependency_and_audits_artifacts():
 
     assert '".[dev,viz]"' in workflow
     assert "scripts/audit_experiment_artifacts.py" in workflow
+    assert "experiments/paper_suite_canonical_smoke" in workflow
     assert "experiment_artifact_audit.json" in workflow
+    assert (
+        "scripts/audit_experiment_artifacts.py > experiment_artifact_audit.json || true"
+        not in workflow
+    )
+    assert "|| true" not in workflow
 
 
 def test_nightly_workflow_runs_full_matrix_and_full_suite():

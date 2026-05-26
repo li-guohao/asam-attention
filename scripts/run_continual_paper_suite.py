@@ -22,6 +22,7 @@ from scripts.sync_continual_appendix import build_continual_appendix, sync_paper
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SENSITIVE_ARG_MARKERS = ("token", "password", "secret", "key")
+TEXT_ARTIFACT_SUFFIXES = {".csv", ".json", ".md", ".tex", ".txt"}
 
 
 @dataclass
@@ -121,22 +122,42 @@ def collect_git_provenance() -> Dict[str, object]:
 
 
 def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    content = path.read_bytes()
+    if path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES:
+        content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(content).hexdigest()
 
 
-def collect_output_hashes(paths: Iterable[object]) -> Dict[str, str]:
+def _output_hash_key(path: Path, output_root: Optional[Path]) -> str:
+    if output_root is not None:
+        try:
+            return path.resolve().relative_to(output_root.resolve()).as_posix()
+        except ValueError:
+            pass
+    return path.name
+
+
+def collect_output_hashes(
+    paths: Iterable[object], output_root: Optional[Path] = None
+) -> Dict[str, str]:
     hashes: Dict[str, str] = {}
     for raw_path in paths:
         if raw_path is None:
             continue
         path = Path(str(raw_path))
         if path.exists() and path.is_file():
-            hashes[path.name] = _file_sha256(path)
+            hashes[_output_hash_key(path, output_root)] = _file_sha256(path)
     return hashes
+
+
+def collect_suite_json_outputs(output_dir: Path) -> list[Path]:
+    if not output_dir.exists():
+        return []
+    return sorted(
+        path
+        for path in output_dir.rglob("*.json")
+        if path.name != "paper_suite_manifest.json" and path.is_file()
+    )
 
 
 def _is_sensitive_arg(arg: str) -> bool:
@@ -172,6 +193,7 @@ def build_manifest_provenance(
     finished_at_utc: str,
     output_paths: Iterable[object],
     git_provenance: Optional[Dict[str, object]] = None,
+    output_root: Optional[Path] = None,
 ) -> Dict[str, object]:
     try:
         import torch
@@ -197,7 +219,7 @@ def build_manifest_provenance(
             "num_seeds": args.num_seeds,
         },
         "device": args.device,
-        "output_hashes": collect_output_hashes(output_paths),
+        "output_hashes": collect_output_hashes(output_paths, output_root),
     }
 
 
@@ -530,29 +552,32 @@ def run_pipeline(args: PipelineArgs) -> Dict[str, object]:
         )
     )
     finished_at_utc = _utc_timestamp()
+    output_paths = [
+        benchmark_json,
+        benchmark_results.get("plot_path"),
+        benchmark_results.get("report_path"),
+        ablation_json,
+        ablation_results.get("table_path"),
+        ablation_results.get("csv_path"),
+        ablation_results.get("plot_path"),
+        ablation_results.get("report_path"),
+        operator_ablation_json,
+        operator_ablation_results.get("table_path"),
+        operator_ablation_results.get("csv_path"),
+        operator_ablation_results.get("plot_path"),
+        operator_ablation_results.get("report_path"),
+        manifest.get("paper_tex"),
+        manifest.get("synced_paper_tex"),
+        manifest.get("appendix_only_tex"),
+        *collect_suite_json_outputs(output_dir),
+    ]
     manifest["provenance"] = build_manifest_provenance(
         resolved_args,
         started_at_utc,
         finished_at_utc,
-        [
-            benchmark_json,
-            benchmark_results.get("plot_path"),
-            benchmark_results.get("report_path"),
-            ablation_json,
-            ablation_results.get("table_path"),
-            ablation_results.get("csv_path"),
-            ablation_results.get("plot_path"),
-            ablation_results.get("report_path"),
-            operator_ablation_json,
-            operator_ablation_results.get("table_path"),
-            operator_ablation_results.get("csv_path"),
-            operator_ablation_results.get("plot_path"),
-            operator_ablation_results.get("report_path"),
-            manifest.get("paper_tex"),
-            manifest.get("synced_paper_tex"),
-            manifest.get("appendix_only_tex"),
-        ],
+        output_paths,
         git_provenance,
+        output_dir,
     )
     suite_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     suite_report.write_text(

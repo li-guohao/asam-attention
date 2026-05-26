@@ -153,6 +153,7 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
     def fake_run_ablation(args):
         call_order.append("ablation")
         captured["ablation"] = args
+        _write(output_dir / "continual_ablation_task_routing_seed42.json", "{}")
         payload = {
             "best_avg_accuracy": {"strategy": "prototype", "value": 0.56},
             "lowest_avg_forgetting": {"strategy": "prototype", "value": -0.05},
@@ -232,6 +233,7 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
     }
     assert provenance["output_hashes"]["continual_benchmark.json"]
     assert provenance["output_hashes"]["continual_ablation.json"]
+    assert provenance["output_hashes"]["continual_ablation_task_routing_seed42.json"]
     assert provenance["output_hashes"]["continual_operator_ablation.json"]
 
     report_text = Path(results["report_path"]).read_text(encoding="utf-8")

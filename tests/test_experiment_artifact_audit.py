@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -7,10 +8,23 @@ sys.path.insert(0, str(repo_root))
 
 from scripts.audit_experiment_artifacts import audit_paths, semantic_fingerprint
 
+TEXT_ARTIFACT_SUFFIXES = {".csv", ".json", ".md", ".tex", ".txt"}
+
 
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _file_sha256(path):
+    content = path.read_bytes()
+    if path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES:
+        content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(content).hexdigest()
+
+
+def _sha256_bytes(content):
+    return hashlib.sha256(content).hexdigest()
 
 
 def _current_manifest():
@@ -43,6 +57,26 @@ def _current_manifest():
         "ablation_json": "old/path/ablation.json",
         "operator_ablation_json": "old/path/operator.json",
     }
+
+
+def _write_current_suite(suite):
+    benchmark = {"accuracy_matrix": [[0.5]], "avg_accuracy": 0.5}
+    ablation = {"strategies": [{"strategy": "dual_transport"}]}
+    operator = {"strategies": [{"name": "masked_sinkhorn_topk"}]}
+    _write_json(suite / "continual_benchmark.json", benchmark)
+    _write_json(suite / "continual_ablation.json", ablation)
+    _write_json(suite / "continual_operator_ablation.json", operator)
+
+    manifest = _current_manifest()
+    manifest["provenance"]["output_hashes"] = {
+        "continual_benchmark.json": _file_sha256(suite / "continual_benchmark.json"),
+        "continual_ablation.json": _file_sha256(suite / "continual_ablation.json"),
+        "continual_operator_ablation.json": _file_sha256(
+            suite / "continual_operator_ablation.json"
+        ),
+    }
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+    return manifest
 
 
 def test_counts_raw_duplicate_json_files(tmp_path):
@@ -117,22 +151,20 @@ def test_aggregate_strategy_metrics_change_semantic_fingerprint():
 
 def test_schema_provenance_ratings(tmp_path):
     current = tmp_path / "experiments" / "paper_suite_current"
-    _write_json(current / "paper_suite_manifest.json", _current_manifest())
-    _write_json(
-        current / "continual_ablation.json", {"strategies": [{"strategy": "dual_transport"}]}
-    )
-    _write_json(
-        current / "continual_operator_ablation.json",
-        {"strategies": [{"name": "masked_sinkhorn_topk"}]},
-    )
+    _write_current_suite(current)
 
     mixed = tmp_path / "experiments" / "paper_suite_mixed"
-    _write_json(mixed / "paper_suite_manifest.json", _current_manifest())
+    _write_current_suite(mixed)
     _write_json(mixed / "continual_ablation.json", {"strategies": [{"strategy": "meta_secant"}]})
-    _write_json(
-        mixed / "continual_operator_ablation.json",
-        {"strategies": [{"name": "masked_sinkhorn_topk"}]},
-    )
+    manifest = _current_manifest()
+    manifest["provenance"]["output_hashes"] = {
+        "continual_benchmark.json": _file_sha256(mixed / "continual_benchmark.json"),
+        "continual_ablation.json": _file_sha256(mixed / "continual_ablation.json"),
+        "continual_operator_ablation.json": _file_sha256(
+            mixed / "continual_operator_ablation.json"
+        ),
+    }
+    _write_json(mixed / "paper_suite_manifest.json", manifest)
 
     outdated = tmp_path / "experiments" / "paper_suite_outdated"
     _write_json(
@@ -182,3 +214,81 @@ def test_manifest_with_unknown_git_commit_is_outdated(tmp_path):
 
     assert summary["suites"][0]["schema_provenance_rating"] == "OUTDATED"
     assert any("provenance.git.commit" in issue["message"] for issue in summary["blocking_issues"])
+
+
+def test_manifest_hash_mismatch_is_blocking(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_hash_mismatch"
+    _write_current_suite(suite)
+    _write_json(suite / "continual_benchmark.json", {"accuracy_matrix": [[0.9]]})
+
+    summary = audit_paths([suite])
+
+    assert summary["blocking_issue_count"] >= 1
+    assert any("hash mismatch" in issue["message"] for issue in summary["blocking_issues"])
+
+
+def test_manifest_missing_hashed_artifact_is_blocking(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_missing_artifact"
+    _write_current_suite(suite)
+    (suite / "continual_operator_ablation.json").unlink()
+
+    summary = audit_paths([suite])
+
+    assert summary["blocking_issue_count"] >= 1
+    assert any(
+        "hashed artifact is missing" in issue["message"] for issue in summary["blocking_issues"]
+    )
+
+
+def test_unhashed_json_artifact_is_blocking(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_unhashed_json"
+    _write_current_suite(suite)
+    _write_json(
+        suite / "continual_operator_ablation_sinkhorn_topk_seed42.json", {"avg_accuracy": 0.5}
+    )
+
+    summary = audit_paths([suite])
+
+    assert summary["blocking_issue_count"] >= 1
+    assert any(
+        "JSON artifact is not covered" in issue["message"] for issue in summary["blocking_issues"]
+    )
+
+
+def test_manifest_hash_key_must_stay_within_suite(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_bad_hash_key"
+    bad_keys = [
+        "../escape.json",
+        "/escape.json",
+        "C:/escape.json",
+        "C:escape.json",
+        "//server/share/escape.json",
+    ]
+
+    for bad_key in bad_keys:
+        _write_current_suite(suite)
+        manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))
+        manifest["provenance"]["output_hashes"][bad_key] = "d" * 64
+        _write_json(suite / "paper_suite_manifest.json", manifest)
+
+        summary = audit_paths([suite])
+
+        assert summary["blocking_issue_count"] >= 1
+        assert any(
+            "not a relative suite path" in issue["message"] for issue in summary["blocking_issues"]
+        )
+
+
+def test_text_artifact_hashes_are_line_ending_stable(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_line_endings"
+    _write_current_suite(suite)
+    crlf_payload = b'{"accuracy_matrix":[[0.5]],"avg_accuracy":0.5}\r\n'
+    lf_payload = crlf_payload.replace(b"\r\n", b"\n")
+    (suite / "continual_benchmark.json").write_bytes(crlf_payload)
+    manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))
+    manifest["provenance"]["output_hashes"]["continual_benchmark.json"] = _sha256_bytes(lf_payload)
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+
+    summary = audit_paths([suite])
+
+    assert summary["blocking_issue_count"] == 0
