@@ -1,0 +1,57 @@
+{
+  "rows": [
+    {
+      "seed": 42,
+      "avg_accuracy": 0.5,
+      "avg_forgetting": 0.08333333333333333,
+      "backward_transfer": -0.016666666666666673,
+      "final_stage_forgetting": 0.08333333333333333,
+      "final_transport_gap": 0.024211836978793144,
+      "final_birkhoff_strength": 0.016141224652528763,
+      "final_birkhoff_gate_factor": 0.8070612326264381,
+      "final_birkhoff_applied_offdiag_mass": 0.0030358653104810562,
+      "final_birkhoff_gap_delta": 0.0,
+      "output_json": "E:\\ASAM Adaptive Sparse Attention Module\\repo_tmp\\experiments\\dbpedia_birkhoff_adaptive_default_seed42.json"
+    },
+    {
+      "seed": 43,
+      "avg_accuracy": 0.6142857142857142,
+      "avg_forgetting": -0.01666666666666668,
+      "backward_transfer": 0.11666666666666668,
+      "final_stage_forgetting": 0.0,
+      "final_transport_gap": 0.02453915774822235,
+      "final_birkhoff_strength": 0.016359440982341766,
+      "final_birkhoff_gate_factor": 0.8179720491170883,
+      "final_birkhoff_applied_offdiag_mass": 0.00307328892431602,
+      "final_birkhoff_gap_delta": -3.725290298461914e-09,
+      "output_json": "E:\\ASAM Adaptive Sparse Attention Module\\repo_tmp\\experiments\\dbpedia_birkhoff_adaptive_default_seed43.json"
+    },
+    {
+      "seed": 44,
+      "avg_accuracy": 0.4714285714285714,
+      "avg_forgetting": 0.08333333333333333,
+      "backward_transfer": -0.049999999999999996,
+      "final_stage_forgetting": 0.08333333333333333,
+      "final_transport_gap": 0.026107994839549065,
+      "final_birkhoff_strength": 0.017648266007502876,
+      "final_birkhoff_gate_factor": 0.8824133003751438,
+      "final_birkhoff_applied_offdiag_mass": 0.005532118423537921,
+      "final_birkhoff_gap_delta": -0.00036440417170524597,
+      "output_json": "E:\\ASAM Adaptive Sparse Attention Module\\repo_tmp\\experiments\\dbpedia_birkhoff_adaptive_default_seed44.json"
+    }
+  ],
+  "summary": {
+    "num_runs": 3,
+    "avg_accuracy_mean": 0.5285714285714286,
+    "avg_accuracy_std": 0.06172133998483673,
+    "avg_forgetting_mean": 0.04999999999999999,
+    "avg_forgetting_std": 0.047140452079103175,
+    "backward_transfer_mean": 0.01666666666666667,
+    "final_stage_forgetting_mean": 0.05555555555555555,
+    "final_transport_gap_mean": 0.024952996522188187,
+    "final_birkhoff_strength_mean": 0.016716310547457803,
+    "final_birkhoff_gate_factor_mean": 0.8358155273728901,
+    "final_birkhoff_applied_offdiag_mass_mean": 0.003880424219444999,
+    "final_birkhoff_gap_delta_mean": -0.00012146929899851482
+  }
+}

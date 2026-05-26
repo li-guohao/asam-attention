@@ -1,61 +1,20 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
+dist/
+build/
+eggs/
 *.egg
+.eggs/
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# Environments
-.env
-.venv
-env/
+# Virtual environments
+.venv/
 venv/
-ENV/
+.env
+env/
 
 # IDE
 .vscode/
@@ -64,28 +23,33 @@ ENV/
 *.swo
 *~
 
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
 # OS
 .DS_Store
 Thumbs.db
 
-# Model checkpoints and data
-*.pth
+# Project specific
 *.pt
+*.pth
 checkpoints/
-runs/
+experiments/*_results/
+*.log
 wandb/
 
-# Benchmark results
-benchmark_results.json
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
 
-# GitHub credentials (NEVER commit these!)
-.github_config.ini
-.github_credentials
-*.token
-.env
-.secrets
-# Local benchmark and report artifacts
-experiments/results_3060/*
-!experiments/results_3060/.gitkeep
-docs/performance_analysis.png
-
+# Misc
+*.bak
+*.orig

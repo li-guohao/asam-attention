@@ -1,0 +1,342 @@
+{
+  "config": {
+    "dataset_name": "split_dbpedia",
+    "classes_per_task": 2,
+    "max_length": 128,
+    "batch_size": 8,
+    "max_train_samples": 140,
+    "max_val_samples": 70,
+    "num_workers": 0,
+    "dim": 64,
+    "num_heads": 4,
+    "num_layers": 1,
+    "top_k_patterns": 2,
+    "routing_mode": "task",
+    "prototype_routing_strategy": "sinkhorn_topk",
+    "num_prototypes": 0,
+    "prototype_slots_per_task": 2,
+    "prototype_top_k": 2,
+    "learning_rate": 0.0003,
+    "epochs_per_task": 1,
+    "overlap_weight": 0.1,
+    "stability_weight": 0.1,
+    "balance_weight": 0.05,
+    "diversity_weight": 0.05,
+    "transport_weight": 0.05,
+    "replay_batch_size": 4,
+    "prototype_reset_threshold": 0.01,
+    "prototype_split_threshold": 0.2,
+    "prototype_noise_scale": 0.05,
+    "prototype_merge_threshold": 0.9,
+    "prototype_merge_usage_threshold": 0.1,
+    "prototype_prior_strength": 1.0,
+    "prototype_capacity_blend": 0.5,
+    "prototype_relocation_strength": 0.75,
+    "adaptive_hyperparameters": false,
+    "adaptation_strategy": "correlation",
+    "adaptation_warmup_stages": 1,
+    "target_stage_forgetting": 0.05,
+    "prior_strength_step": 0.25,
+    "capacity_blend_step": 0.1,
+    "relocation_strength_step": 0.1,
+    "meta_transport_weight": 0.5,
+    "meta_transport_loss_weight": 0.25,
+    "meta_excess_weight": 0.25,
+    "meta_routing_weight": 0.25,
+    "meta_secant_mix": 0.25,
+    "meta_secant_eps": 0.001,
+    "transport_weight_step": 0.5,
+    "prototype_topk_step": 2.5,
+    "dual_transport_trend_weight": 0.5,
+    "dual_transport_gap_weight": 0.25,
+    "dual_transport_loss_weight": 0.25,
+    "dual_topk_min_stages": 3,
+    "dual_topk_threshold": 0.35,
+    "device": "cpu",
+    "seed": 44,
+    "output_json": "experiments\\controller_round12_dbpedia_taskwise_dual_transport_ablation_task_routing_seed44.json"
+  },
+  "resolved_prototype_layout": {
+    "num_prototypes": 14,
+    "prototype_top_k": 2,
+    "prototype_slots_per_task": 2
+  },
+  "num_tasks": 7,
+  "accuracy_matrix": [
+    [
+      0.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.6,
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.5,
+      0.6,
+      0.5,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.6,
+      0.7,
+      0.4,
+      0.5,
+      0.6,
+      0.0
+    ],
+    [
+      0.5,
+      0.3,
+      0.5,
+      0.6,
+      0.5,
+      0.6,
+      0.5
+    ]
+  ],
+  "stage_training_metrics": [
+    {
+      "train_loss": 0.7065654595692953,
+      "overlap_loss": 0.0,
+      "stability_loss": 0.00013551285762029389,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.738132894039154,
+      "overlap_loss": 0.3590145905812581,
+      "stability_loss": 0.00010620678464571635,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7441149751345316,
+      "overlap_loss": 0.315485159556071,
+      "stability_loss": 8.658486816178386e-05,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7342564066251119,
+      "overlap_loss": 0.3196462392807007,
+      "stability_loss": 7.343196314953578e-05,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7175429066022238,
+      "overlap_loss": 0.2895268201828003,
+      "stability_loss": 0.0001162199174965887,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.728027880191803,
+      "overlap_loss": 0.2935863137245178,
+      "stability_loss": 6.0167983368349574e-05,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7084406216939291,
+      "overlap_loss": 0.2849089701970418,
+      "stability_loss": 9.160102611834493e-05,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "effective_transport_weight": 0.05000000000000001,
+      "routing_stability_loss": 0.0
+    }
+  ],
+  "prototype_lifecycle": [],
+  "prototype_diagnostics": [],
+  "theory_diagnostics": {
+    "stage_forgetting": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.024999999999999994,
+      0.039999999999999994,
+      0.08333333333333333
+    ],
+    "stage_avg_accuracy": [
+      0.5,
+      0.5,
+      0.5,
+      0.525,
+      0.52,
+      0.5499999999999999,
+      0.5
+    ],
+    "stage_task_forgetting": [
+      [
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.09999999999999998,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.19999999999999996,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.3,
+        0.19999999999999996,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "stage_transport_gap": [],
+    "stage_max_transport_gap": [],
+    "stage_routing_stability_loss": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "stage_stability_loss": [
+      0.00013551285762029389,
+      0.00010620678464571635,
+      8.658486816178386e-05,
+      7.343196314953578e-05,
+      0.0001162199174965887,
+      6.0167983368349574e-05,
+      9.160102611834493e-05
+    ],
+    "stage_overlap_loss": [
+      0.0,
+      0.3590145905812581,
+      0.315485159556071,
+      0.3196462392807007,
+      0.2895268201828003,
+      0.2935863137245178,
+      0.2849089701970418
+    ],
+    "stage_transport_loss": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "stage_merge_count": [],
+    "stage_mean_abs_excess": [],
+    "stage_routing_entropy": [],
+    "forgetting_correlations": {
+      "routing_stability": null,
+      "stability_loss": -0.2546222676095431,
+      "transport_gap": null,
+      "transport_loss": null,
+      "max_transport_gap": null,
+      "mean_abs_excess": null,
+      "merge_count": null,
+      "routing_entropy": null
+    }
+  },
+  "hyperparameter_history": [],
+  "final_hyperparameters": {
+    "prototype_prior_strength": 0.0,
+    "prototype_capacity_blend": 0.0,
+    "prototype_relocation_strength": 0.0,
+    "prototype_merge_threshold": 0.0,
+    "prototype_merge_usage_threshold": 0.0,
+    "transport_weight": 0.05,
+    "task_transport_weights": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05
+    ]
+  },
+  "avg_accuracy": 0.5,
+  "avg_forgetting": 0.08333333333333333,
+  "backward_transfer": -0.016666666666666673,
+  "plot_path": "experiments\\controller_round12_dbpedia_taskwise_dual_transport_ablation_task_routing_seed44_plots.png",
+  "report_path": "experiments\\controller_round12_dbpedia_taskwise_dual_transport_ablation_task_routing_seed44_report.md"
+}

@@ -1,0 +1,277 @@
+{
+  "config": {
+    "dataset_name": "split_dbpedia",
+    "classes_per_task": 2,
+    "max_length": 128,
+    "batch_size": 8,
+    "max_train_samples": 140,
+    "max_val_samples": 70,
+    "num_workers": 0,
+    "dim": 64,
+    "num_heads": 4,
+    "num_layers": 1,
+    "top_k_patterns": 2,
+    "routing_mode": "task",
+    "prototype_routing_strategy": "sinkhorn_topk",
+    "num_prototypes": 0,
+    "prototype_slots_per_task": 2,
+    "prototype_top_k": 2,
+    "learning_rate": 0.0003,
+    "epochs_per_task": 1,
+    "overlap_weight": 0.1,
+    "stability_weight": 0.1,
+    "balance_weight": 0.05,
+    "diversity_weight": 0.05,
+    "transport_weight": 0.05,
+    "replay_batch_size": 4,
+    "prototype_reset_threshold": 0.01,
+    "prototype_split_threshold": 0.2,
+    "prototype_noise_scale": 0.05,
+    "prototype_merge_threshold": 0.9,
+    "prototype_merge_usage_threshold": 0.1,
+    "prototype_prior_strength": 1.0,
+    "prototype_capacity_blend": 0.5,
+    "prototype_relocation_strength": 0.75,
+    "adaptive_hyperparameters": false,
+    "adaptation_strategy": "correlation",
+    "adaptation_warmup_stages": 1,
+    "target_stage_forgetting": 0.05,
+    "prior_strength_step": 0.25,
+    "capacity_blend_step": 0.1,
+    "relocation_strength_step": 0.1,
+    "meta_transport_weight": 0.5,
+    "meta_transport_loss_weight": 0.25,
+    "meta_excess_weight": 0.25,
+    "meta_routing_weight": 0.25,
+    "meta_secant_mix": 0.7,
+    "meta_secant_eps": 0.001,
+    "transport_weight_step": 0.5,
+    "prototype_topk_step": 8.0,
+    "device": "cpu",
+    "seed": 42,
+    "output_json": "experiments\\controller_round5_dbpedia_ablation_task_routing_seed42.json"
+  },
+  "resolved_prototype_layout": {
+    "num_prototypes": 14,
+    "prototype_top_k": 2,
+    "prototype_slots_per_task": 2
+  },
+  "num_tasks": 7,
+  "accuracy_matrix": [
+    [
+      0.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.5,
+      0.3,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.5,
+      0.4,
+      0.5,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.4,
+      0.6,
+      0.5,
+      0.7,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.7,
+      0.5
+    ]
+  ],
+  "stage_training_metrics": [
+    {
+      "train_loss": 0.6873488823572794,
+      "overlap_loss": 0.0,
+      "stability_loss": 0.00012688008913149437,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.715613842010498,
+      "overlap_loss": 0.3189285596211751,
+      "stability_loss": 9.643212494362767e-05,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7214941382408142,
+      "overlap_loss": 0.29726988077163696,
+      "stability_loss": 0.00016860571728708842,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7598099708557129,
+      "overlap_loss": 0.3091585636138916,
+      "stability_loss": 0.0001228148660932978,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7302146752675375,
+      "overlap_loss": 0.29286439220110577,
+      "stability_loss": 0.00023402783942098418,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.7240504423777262,
+      "overlap_loss": 0.2840625047683716,
+      "stability_loss": 0.00012840531417168677,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.73905348777771,
+      "overlap_loss": 0.2789847056070964,
+      "stability_loss": 0.00014161596724685901,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "routing_stability_loss": 0.0
+    }
+  ],
+  "prototype_lifecycle": [],
+  "prototype_diagnostics": [],
+  "theory_diagnostics": {
+    "stage_forgetting": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.019999999999999997,
+      0.016666666666666663
+    ],
+    "stage_avg_accuracy": [
+      0.5,
+      0.5,
+      0.5,
+      0.45,
+      0.48,
+      0.5333333333333333,
+      0.5285714285714286
+    ],
+    "stage_transport_gap": [],
+    "stage_max_transport_gap": [],
+    "stage_routing_stability_loss": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "stage_stability_loss": [
+      0.00012688008913149437,
+      9.643212494362767e-05,
+      0.00016860571728708842,
+      0.0001228148660932978,
+      0.00023402783942098418,
+      0.00012840531417168677,
+      0.00014161596724685901
+    ],
+    "stage_overlap_loss": [
+      0.0,
+      0.3189285596211751,
+      0.29726988077163696,
+      0.3091585636138916,
+      0.29286439220110577,
+      0.2840625047683716,
+      0.2789847056070964
+    ],
+    "stage_transport_loss": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "stage_merge_count": [],
+    "stage_mean_abs_excess": [],
+    "stage_routing_entropy": [],
+    "forgetting_correlations": {
+      "routing_stability": null,
+      "stability_loss": -0.1694124611771303,
+      "transport_gap": null,
+      "transport_loss": null,
+      "max_transport_gap": null,
+      "mean_abs_excess": null,
+      "merge_count": null,
+      "routing_entropy": null
+    }
+  },
+  "hyperparameter_history": [],
+  "final_hyperparameters": {
+    "prototype_prior_strength": 0.0,
+    "prototype_capacity_blend": 0.0,
+    "prototype_relocation_strength": 0.0,
+    "prototype_merge_threshold": 0.0,
+    "prototype_merge_usage_threshold": 0.0,
+    "transport_weight": 0.05
+  },
+  "avg_accuracy": 0.5285714285714286,
+  "avg_forgetting": 0.016666666666666663,
+  "backward_transfer": 0.03333333333333333,
+  "plot_path": "experiments\\controller_round5_dbpedia_ablation_task_routing_seed42_plots.png",
+  "report_path": "experiments\\controller_round5_dbpedia_ablation_task_routing_seed42_report.md"
+}

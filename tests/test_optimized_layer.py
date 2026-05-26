@@ -2,10 +2,50 @@
 Tests for optimized ASAM execution paths.
 """
 
+import math
+
 import torch
 
 from asam.asam_layer_optimized import OptimizedASAMLayer
+from asam._common import gather_values_by_positions
 from asam.efficient_attention import EfficientASAMLayer
+from asam.sparse_patterns import StridedSparsePattern
+
+
+def _dense_reference_attention(q, k, v, mask):
+    scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(q.size(-1))
+    scores = scores.masked_fill(~mask, float('-inf'))
+    attn = torch.softmax(scores, dim=-1)
+    attn = torch.nan_to_num(attn, nan=0.0)
+    return torch.matmul(attn, v)
+
+
+def test_position_gather_preserves_independent_heads():
+    tensor = torch.arange(1 * 2 * 5 * 3).reshape(1, 2, 5, 3)
+    positions = torch.tensor([[0, 1], [1, 2], [2, 3], [3, 4], [4, 4]])
+
+    gathered = gather_values_by_positions(tensor, positions)
+
+    assert gathered.shape == (1, 2, 5, 2, 3)
+    assert torch.equal(gathered[0, 0, 0], tensor[0, 0, positions[0]])
+    assert torch.equal(gathered[0, 1, 0], tensor[0, 1, positions[0]])
+    assert not torch.equal(gathered[0, 0], gathered[0, 1])
+
+
+def test_position_gather_supports_head_specific_positions():
+    tensor = torch.arange(1 * 2 * 5 * 3).reshape(1, 2, 5, 3)
+    positions = torch.tensor(
+        [
+            [[0, 1], [1, 2], [2, 3], [3, 4], [4, 4]],
+            [[4, 3], [3, 2], [2, 1], [1, 0], [0, 0]],
+        ]
+    )
+
+    gathered = gather_values_by_positions(tensor, positions)
+
+    assert gathered.shape == (1, 2, 5, 2, 3)
+    assert torch.equal(gathered[0, 0, 0], tensor[0, 0, positions[0, 0]])
+    assert torch.equal(gathered[0, 1, 0], tensor[0, 1, positions[1, 0]])
 
 
 def test_optimized_gate_shapes_follow_num_heads():
@@ -63,3 +103,62 @@ def test_optimized_layer_supports_attention_mask():
 
     assert output.shape == x.shape
     assert not torch.isnan(output).any()
+
+
+def test_optimized_local_attention_matches_dense_reference_with_mask():
+    layer = OptimizedASAMLayer(dim=32, num_heads=2, window_size=4, dropout=0.0, use_adaptive_gate=False)
+    q = torch.randn(1, 2, 7, 16)
+    k = torch.randn(1, 2, 7, 16)
+    v = torch.randn(1, 2, 7, 16)
+
+    extra_mask = torch.ones(1, 1, 7, 7, dtype=torch.bool)
+    extra_mask[..., 0, 2] = False
+    extra_mask[..., 3, 4] = False
+    extra_mask[..., 6, 5] = False
+
+    local_mask = layer._get_dense_local_mask(7, torch.device("cpu")).unsqueeze(0).unsqueeze(0)
+    reference_mask = local_mask & extra_mask
+
+    actual = layer._compute_local_attention(q, k, v, window_size=4, mask=extra_mask)
+    expected = _dense_reference_attention(q, k, v, reference_mask.expand(-1, q.size(1), -1, -1))
+
+    assert torch.allclose(actual, expected, atol=1e-5)
+
+
+def test_optimized_strided_attention_matches_dense_reference():
+    layer = OptimizedASAMLayer(
+        dim=32,
+        num_heads=2,
+        window_size=8,
+        stride=4,
+        dropout=0.0,
+        use_adaptive_gate=False,
+        pattern_type='strided',
+    )
+    q = torch.randn(1, 2, 9, 16)
+    k = torch.randn(1, 2, 9, 16)
+    v = torch.randn(1, 2, 9, 16)
+
+    local_window = layer._get_strided_local_window()
+    pattern = StridedSparsePattern(seq_len=9, stride=layer.stride, local_window=local_window)
+    reference_mask = pattern.build_pattern().unsqueeze(0).unsqueeze(0).expand(-1, q.size(1), -1, -1)
+
+    actual = layer._compute_strided_attention(q, k, v, stride=layer.stride, local_window=local_window)
+    expected = _dense_reference_attention(q, k, v, reference_mask)
+
+    assert torch.allclose(actual, expected, atol=1e-5)
+
+
+def test_optimized_local_attention_with_mask_keeps_sparse_path(monkeypatch):
+    layer = OptimizedASAMLayer(dim=64, num_heads=2, window_size=16, use_adaptive_gate=False)
+    x = torch.randn(2, 12, 64)
+    mask = torch.eye(12, dtype=torch.bool).unsqueeze(0).unsqueeze(0)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("dense fallback should not be used for local masked attention")
+
+    monkeypatch.setattr(layer, "_fallback_attention_with_mask", fail_if_called)
+
+    output, _ = layer(x, mask=mask)
+
+    assert output.shape == x.shape

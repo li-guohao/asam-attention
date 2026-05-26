@@ -1,0 +1,18 @@
+include README.md
+include README.zh-CN.md
+include LICENSE
+include CHANGELOG.md
+include requirements.txt
+include pyproject.toml
+include setup.py
+
+recursive-include docs *.md *.svg
+recursive-include examples *.py
+recursive-include tutorials *.py
+recursive-include paper/figures *.pdf *.png
+recursive-include scripts *.py
+recursive-exclude * __pycache__
+recursive-exclude * *.pyc
+
+global-exclude .gitignore
+global-exclude .DS_Store

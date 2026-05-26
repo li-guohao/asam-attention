@@ -15,6 +15,23 @@ from asam.sparse_patterns import (
 )
 
 
+def _dense_reference_sparse_attention(q, k, v, pattern_mask, mask=None):
+    scores = torch.matmul(q, k.transpose(-2, -1))
+
+    if pattern_mask.dim() == 2:
+        pattern_mask = pattern_mask.unsqueeze(0).unsqueeze(0)
+    elif pattern_mask.dim() == 3:
+        pattern_mask = pattern_mask.unsqueeze(0)
+
+    scores = scores.masked_fill(~pattern_mask, float('-inf'))
+    if mask is not None:
+        scores = scores.masked_fill(~mask, float('-inf'))
+
+    attn = torch.softmax(scores, dim=-1)
+    attn = torch.nan_to_num(attn, nan=0.0)
+    return torch.matmul(attn, v)
+
+
 class TestSparsePatterns:
     """Test sparse attention patterns."""
     
@@ -309,6 +326,54 @@ class TestASAMLayer:
             with torch.no_grad():
                 output, _ = layer(x)
             assert output.shape == x.shape
+
+    def test_sparse_attention_matches_dense_reference_for_local_pattern(self):
+        config = ASAMConfig(
+            dim=64,
+            num_heads=2,
+            dim_head=32,
+            pattern_type="local",
+            window_size=8,
+            use_adaptive_gate=False,
+        )
+        layer = ASAMLayer(config)
+
+        q = torch.randn(1, 2, 10, 32) * layer.scale
+        k = torch.randn(1, 2, 10, 32)
+        v = torch.randn(1, 2, 10, 32)
+        extra_mask = torch.ones(1, 1, 10, 10, dtype=torch.bool)
+        extra_mask[..., 0, 3] = False
+        extra_mask[..., 5, 4] = False
+
+        pattern = layer._get_pattern(seq_len=10, device=torch.device("cpu"))
+        actual = layer._compute_sparse_attention(q, k, v, pattern, mask=extra_mask)
+        expected = _dense_reference_sparse_attention(q, k, v, pattern.get_pattern(torch.device("cpu")), mask=extra_mask)
+
+        assert torch.allclose(actual, expected, atol=1e-5)
+
+    def test_sparse_attention_matches_dense_reference_for_hierarchical_pattern(self):
+        config = ASAMConfig(
+            dim=64,
+            num_heads=2,
+            dim_head=32,
+            pattern_type="hierarchical",
+            use_adaptive_gate=False,
+        )
+        layer = ASAMLayer(config)
+
+        q = torch.randn(1, 2, 12, 32) * layer.scale
+        k = torch.randn(1, 2, 12, 32)
+        v = torch.randn(1, 2, 12, 32)
+        extra_mask = torch.ones(1, 2, 12, 12, dtype=torch.bool)
+        extra_mask[:, 0, 1, 8] = False
+        extra_mask[:, 1, 9, 2] = False
+
+        pattern = layer._get_pattern(seq_len=12, device=torch.device("cpu"))
+        pattern_mask = pattern.combine_patterns(torch.device("cpu"))
+        actual = layer._compute_sparse_attention(q, k, v, pattern, mask=extra_mask)
+        expected = _dense_reference_sparse_attention(q, k, v, pattern_mask, mask=extra_mask)
+
+        assert torch.allclose(actual, expected, atol=1e-5)
 
 
 class TestIntegration:

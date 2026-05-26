@@ -1,0 +1,92 @@
+[
+  {
+    "name": "no_adaptation",
+    "seed": 43,
+    "avg_accuracy": 0.5142857142857143,
+    "avg_forgetting": 0.09999999999999999,
+    "backward_transfer": -0.01666666666666668,
+    "final_stage_forgetting": 0.09999999999999999,
+    "final_weighted_transport_loss": 0.002623966739823421,
+    "final_task_transport_weights": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05
+    ],
+    "final_task_transport_signals": null
+  },
+  {
+    "name": "dual_transport",
+    "seed": 43,
+    "avg_accuracy": 0.5142857142857143,
+    "avg_forgetting": 0.09999999999999999,
+    "backward_transfer": -0.01666666666666668,
+    "final_stage_forgetting": 0.09999999999999999,
+    "final_weighted_transport_loss": 0.002955186956872543,
+    "final_task_transport_weights": [
+      0.05976398822218226,
+      0.05974832055407044,
+      0.05,
+      0.06781181451336434,
+      0.05000000000000001,
+      0.05453143560276167,
+      0.05697592648206312
+    ],
+    "final_task_transport_signals": [
+      0.07970292158424852,
+      0.22942611984908576,
+      0.0,
+      0.18065219186246403,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "no_adaptation",
+    "seed": 44,
+    "avg_accuracy": 0.4857142857142857,
+    "avg_forgetting": 0.049999999999999996,
+    "backward_transfer": -9.25185853854297e-18,
+    "final_stage_forgetting": 0.049999999999999996,
+    "final_weighted_transport_loss": 0.002981371944770217,
+    "final_task_transport_weights": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05
+    ],
+    "final_task_transport_signals": null
+  },
+  {
+    "name": "dual_transport",
+    "seed": 44,
+    "avg_accuracy": 0.4857142857142857,
+    "avg_forgetting": 0.049999999999999996,
+    "backward_transfer": -9.25185853854297e-18,
+    "final_stage_forgetting": 0.049999999999999996,
+    "final_weighted_transport_loss": 0.003062125528231263,
+    "final_task_transport_weights": [
+      0.057391000650849094,
+      0.053271967158393156,
+      0.05,
+      0.05000000000000001,
+      0.05081799178959829,
+      0.050817991789598296,
+      0.05204982523140648
+    ],
+    "final_task_transport_signals": [
+      0.2757290050387382,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  }
+]

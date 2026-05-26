@@ -1,61 +1,56 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
+All notable changes to ASAM (Adaptive Sparse Attention Mechanism).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project follows a tag-based release workflow.
-
-## [v1.1.1] - 2026-04-14
-
-Release: [ASAM v1.1.1 - Sparse Path Optimizations and Profiling](https://github.com/li-guohao/asam-attention/releases/tag/v1.1.1)
+## [1.2.0] - 2026-04-29
 
 ### Added
-
-- Added `benchmarks/profile_patterns.py` for profiling sparse pattern build time, cache reuse, effective combine cost, memory footprint, and sparsity.
-- Added `docs/performance_optimization_report.md` summarizing the implemented optimizations and measured gains.
-- Added regression coverage for lazy gate execution, local mask caching, random pattern determinism, hierarchical cache reuse, and clustered assignment equivalence.
+- `pyproject.toml` and `setup.py` for standard Python packaging
+- HuggingFace Transformers integration (`ASAMHFModel`, `ASAMHFForSequenceClassification`)
+- Multi-GPU distributed training support (DDP, FSDP)
+- ONNX export with accuracy verification
+- Real LRA benchmark pipeline with measured (not simulated) results
+- Pretrained model weights training script
+- `.gitignore`, `MANIFEST.in`, `CHANGELOG.md`
 
 ### Changed
+- Unified version to `1.2.0` across all files
+- Resolved `FlashASAMLayer` naming conflict: `flash_asam.py` class renamed to `FlashAttnASAMLayer`
+- Extracted shared utility functions to `asam/_common.py` to eliminate code duplication
+- Expanded `__init__.py` exports from 10 to 18 public symbols
+- Added type annotations to all public API classes
+- Fixed GitHub Actions CI branch trigger from `main` to `master`
 
-- Optimized `OptimizedASAMLayer` by fixing `AdaptiveGate` head configuration, skipping unnecessary gate work unless debug info is requested, and improving boundary handling for local attention.
-- Improved `EfficientASAMLayer` with reusable local attention mask caching and corrected sparse ratio estimation.
-- Vectorized `LocalSparsePattern`, `StridedSparsePattern`, and `RandomSparsePattern` construction.
-- Added per-device sparse pattern caching to reduce repeated device transfer overhead.
-- Accelerated `HierarchicalSparsePattern.combine_patterns()` using cached pattern stacks.
-- Optimized `ClusteredSparsePattern.compute_cluster_assignment()` with batched matrix multiplication.
+### Fixed
+- Completed incomplete `FlashAttnASAMLayer.__init__` implementation in `flash_asam.py`
+- Fixed CI benchmark step that used non-existent `--quick` flag
 
-### Performance
+## [1.1.1] - 2026-02
 
-- `OptimizedASAMLayer`: `32.84 ms -> 24.58 ms` (`1.34x`)
-- `EfficientASAMLayer`: `12.19 ms -> 11.30 ms` (`1.08x`)
-- `LocalSparsePattern.build_pattern()`: `28.55 ms -> 17.81 ms` (`1.60x`)
-- `StridedSparsePattern.build_pattern()`: `82.09 ms -> 18.10 ms` (`4.54x`)
-- `RandomSparsePattern.build_pattern()`: `540.76 ms -> 239.46 ms` (`2.26x`)
-- `HierarchicalSparsePattern.combine_patterns()` on CPU: `774.75 ms -> 158.47 ms` (`4.89x`)
-- `HierarchicalSparsePattern.combine_patterns()` on CUDA: `43.06 ms -> 2.94 ms` (`14.65x`)
-- Clustered full path: `2.540 ms -> 2.252 ms` (`1.13x`)
+### Changed
+- Sparse pattern construction performance optimization (1.6-14.6x speedup)
+- Hierarchical pattern GPU caching
+- Clustered assignment computation via batched matmul
+- OptimizedASAMLayer gate lazy computation
+- EfficientASAMLayer local mask cache reuse
 
-### Validation
-
-- Test suite result: `32 passed`
-
-## [v1.1.0] - 2026-02-01
-
-Release: [ASAM v1.1.0 - Flash Attention Optimization](https://github.com/li-guohao/asam-attention/releases/tag/v1.1.0)
+## [1.1.0] - 2026-01
 
 ### Added
+- Flash Attention integration (`FlashASAMLayer` with 3-4.5x forward speedup)
+- Mixed precision training support (additional 2x training speedup)
+- `EfficientASAMLayer` and `OptimizedASAMLayer` variants
+- Comprehensive performance analysis report (RTX 3060)
 
-- Added `FlashASAMLayer` for hardware-optimized attention execution.
-- Added `EfficientASAMLayer` for memory-efficient attention computation.
-- Added mixed precision training support.
-- Added benchmark and analysis tooling for RTX 3060 evaluation.
+## [1.0.0] - 2025-12
 
-### Performance
-
-- Up to `4.5x` faster forward pass.
-- Up to `2.0x` training speedup with mixed precision.
-- Up to `5.45x` combined speedup at `1024` tokens.
-- Up to `50-75%` memory savings on RTX 3060.
-
-[v1.1.1]: https://github.com/li-guohao/asam-attention/releases/tag/v1.1.1
-[v1.1.0]: https://github.com/li-guohao/asam-attention/releases/tag/v1.1.0
+### Added
+- Initial release
+- `ASAMLayer` with adaptive gating and sparse pattern selection
+- Five sparse patterns: local, strided, random, clustered, hierarchical
+- `AdaptiveGate` with complexity estimation and confidence prediction
+- `ClusteredSparsePattern` with learnable centroids
+- `HierarchicalSparsePattern` with multi-scale combination
+- Long Range Arena benchmark suite
+- SOTA comparison vs Transformer, Longformer, Linformer, Performer
+- Comprehensive documentation (TECHNICAL.md, SURVEY.md, API.md)

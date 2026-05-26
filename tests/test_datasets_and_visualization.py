@@ -27,6 +27,10 @@ visualize_attention = load_module(
 )
 
 ArXivDataset = text_dataset.ArXivDataset
+AGNewsDataset = text_dataset.AGNewsDataset
+DBPediaDataset = text_dataset.DBPediaDataset
+build_split_classification_tasks = text_dataset.build_split_classification_tasks
+get_continual_dataloaders = text_dataset.get_continual_dataloaders
 AttentionVisualizer = visualize_attention.AttentionVisualizer
 
 
@@ -94,3 +98,84 @@ def test_visualize_sparse_pattern_builds_pattern_without_forward(tmp_path):
 
     assert fig is not None
     assert output_path.exists()
+
+
+def test_agnews_dummy_dataset_and_split_tasks():
+    dataset = AGNewsDataset._dummy_dataset(max_length=128, max_samples=16)
+    tasks = build_split_classification_tasks(dataset, classes_per_task=2)
+
+    assert len(tasks) == 2
+
+    task0_tokens, task0_label, task0_id = tasks[0][0]
+    task1_tokens, task1_label, task1_id = tasks[1][0]
+
+    assert task0_tokens.shape[0] == 128
+    assert task1_tokens.shape[0] == 128
+    assert int(task0_label.item()) in {0, 1}
+    assert int(task1_label.item()) in {0, 1}
+    assert int(task0_id.item()) == 0
+    assert int(task1_id.item()) == 1
+
+
+def test_agnews_loader_supports_text_label_schema(monkeypatch):
+    import sys
+    import types
+
+    fake_items = [
+        {"text": "World news sample", "label": 0},
+        {"text": "Sports news sample", "label": 1},
+    ]
+
+    fake_datasets = types.SimpleNamespace(load_dataset=lambda *args, **kwargs: fake_items)
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+
+    dataset = AGNewsDataset.load(split="train", max_length=32, max_samples=2)
+
+    assert len(dataset) == 2
+    assert dataset.texts[0] == "World news sample"
+    assert dataset.labels == [0, 1]
+
+
+
+def test_split_dbpedia_continual_loader_builds_seven_tasks(monkeypatch):
+    monkeypatch.setattr(DBPediaDataset, "load", classmethod(lambda cls, **kwargs: cls._dummy_dataset(max_length=64, max_samples=56)))
+
+    train_loaders, val_loaders = get_continual_dataloaders(
+        dataset_name="split_dbpedia",
+        batch_size=4,
+        max_length=64,
+        classes_per_task=2,
+        max_train_samples=56,
+        max_val_samples=56,
+    )
+
+    assert len(train_loaders) == 7
+    assert len(val_loaders) == 7
+
+    batch_inputs, batch_labels, batch_task_ids = next(iter(train_loaders[-1]))
+    assert batch_inputs.shape[-1] == 64
+    assert batch_labels.max().item() <= 1
+    assert int(batch_task_ids[0].item()) == 6
+
+
+
+def test_split_arxiv_continual_loader_builds_four_tasks(monkeypatch):
+    monkeypatch.setattr(ArXivDataset, "load", classmethod(lambda cls, **kwargs: cls._dummy_dataset(max_length=64, max_samples=32)))
+
+    train_loaders, val_loaders = get_continual_dataloaders(
+        dataset_name="split_arxiv",
+        batch_size=4,
+        max_length=64,
+        classes_per_task=2,
+        max_train_samples=32,
+        max_val_samples=32,
+    )
+
+    assert len(train_loaders) == 4
+    assert len(val_loaders) == 4
+
+    batch_inputs, batch_labels, batch_task_ids = next(iter(train_loaders[0]))
+    assert batch_inputs.shape[-1] == 64
+    assert batch_labels.max().item() <= 1
+    assert int(batch_task_ids[0].item()) == 0
+
