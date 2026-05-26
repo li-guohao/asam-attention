@@ -14,7 +14,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-
 CURRENT = "CURRENT"
 MIXED = "MIXED"
 OUTDATED = "OUTDATED"
@@ -140,6 +139,58 @@ def _load_named_json(suite_path: Path, name: str) -> Any | None:
     return payload
 
 
+def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, dict):
+        return False, ["provenance"]
+
+    missing: list[str] = []
+    for key in [
+        "argv",
+        "python_version",
+        "torch_version",
+        "started_at_utc",
+        "finished_at_utc",
+        "git",
+        "dataset",
+        "output_hashes",
+    ]:
+        if not provenance.get(key):
+            missing.append(f"provenance.{key}")
+
+    git = provenance.get("git")
+    if not isinstance(git, dict):
+        missing.append("provenance.git")
+    else:
+        if not git.get("commit") or git.get("commit") == "unknown":
+            missing.append("provenance.git.commit")
+        if not isinstance(git.get("dirty"), bool):
+            missing.append("provenance.git.dirty")
+
+    dataset = provenance.get("dataset")
+    if not isinstance(dataset, dict):
+        missing.append("provenance.dataset")
+    else:
+        for key in ["name", "classes_per_task", "seed", "num_seeds"]:
+            if dataset.get(key) is None:
+                missing.append(f"provenance.dataset.{key}")
+
+    output_hashes = provenance.get("output_hashes")
+    if not isinstance(output_hashes, dict):
+        missing.append("provenance.output_hashes")
+    else:
+        for key in [
+            "continual_benchmark.json",
+            "continual_ablation.json",
+            "continual_operator_ablation.json",
+        ]:
+            value = output_hashes.get(key)
+            if not isinstance(value, str) or len(value) != 64:
+                missing.append(f"provenance.output_hashes.{key}")
+
+    return not missing, sorted(set(missing))
+
+
 def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     blocking: list[dict[str, str]] = []
     suspicious: list[dict[str, str]] = []
@@ -171,10 +222,24 @@ def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], lis
         )
         return OUTDATED, blocking, suspicious
 
+    has_provenance, missing_provenance = _has_strict_provenance(manifest)
+    if not has_provenance:
+        blocking.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "message": "manifest is missing strict provenance fields: "
+                + ", ".join(missing_provenance),
+            }
+        )
+        return OUTDATED, blocking, suspicious
+
     ablation = _load_named_json(suite_path, "continual_ablation.json")
     operator = _load_named_json(suite_path, "continual_operator_ablation.json")
     ablation_strategies = _collect_values(ablation, ["strategy", "name", "adaptation_strategy"])
-    operator_strategies = _collect_values(operator, ["strategy", "name", "prototype_routing_strategy"])
+    operator_strategies = _collect_values(
+        operator, ["strategy", "name", "prototype_routing_strategy"]
+    )
 
     if "dual_transport" not in ablation_strategies:
         suspicious.append(

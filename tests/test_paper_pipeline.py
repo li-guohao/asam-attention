@@ -10,8 +10,11 @@ repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
 
 import scripts.run_continual_paper_suite as paper_suite
-from scripts.run_continual_paper_suite import PipelineArgs, build_pipeline_report, resolve_candidate_profile
-
+from scripts.run_continual_paper_suite import (
+    PipelineArgs,
+    build_pipeline_report,
+    resolve_candidate_profile,
+)
 
 
 def test_pipeline_report_mentions_key_artifacts():
@@ -56,7 +59,9 @@ def test_pipeline_report_mentions_key_artifacts():
         "appendix_only_tex": "paper/continual_appendix_only.tex",
     }
 
-    report = build_pipeline_report(args, benchmark_results, ablation_results, operator_ablation_results, manifest)
+    report = build_pipeline_report(
+        args, benchmark_results, ablation_results, operator_ablation_results, manifest
+    )
 
     assert "# Continual ASAM Paper Suite" in report
     assert "Meta-secant avg accuracy" in report
@@ -71,7 +76,6 @@ def test_pipeline_report_mentions_key_artifacts():
     assert "## Paper Sync" in report
     assert "Synced paper TeX" in report
     assert "Standalone appendix TeX" in report
-
 
 
 def test_resolve_candidate_profile_overrides_layout():
@@ -95,10 +99,38 @@ def test_resolve_candidate_profile_overrides_layout():
     assert "transport loss disabled" in profile["description"]
 
 
+def test_manifest_provenance_redacts_sensitive_argv(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        paper_suite.sys,
+        "argv",
+        [
+            "scripts/run_continual_paper_suite.py",
+            "--hf-token",
+            "hf_secret_value",
+            "--github-token=ghp_secret_value",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    provenance = paper_suite.build_manifest_provenance(
+        PipelineArgs(output_dir=str(tmp_path)),
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:01:00Z",
+        [],
+    )
+
+    joined_argv = " ".join(provenance["argv"])
+    assert "hf_secret_value" not in joined_argv
+    assert "ghp_secret_value" not in joined_argv
+    assert "<redacted>" in joined_argv
+    assert str(tmp_path) in joined_argv
+
 
 def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
     output_dir = tmp_path / "paper_suite_profile"
     captured = {}
+    call_order = []
 
     def _write(path: Path, content: str) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +138,7 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
         return str(path)
 
     def fake_run_benchmark(args):
+        call_order.append("benchmark")
         captured["benchmark"] = args
         payload = {
             "avg_accuracy": 0.55,
@@ -118,6 +151,7 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
         return payload
 
     def fake_run_ablation(args):
+        call_order.append("ablation")
         captured["ablation"] = args
         payload = {
             "best_avg_accuracy": {"strategy": "prototype", "value": 0.56},
@@ -131,6 +165,7 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
         return payload
 
     def fake_run_operator_ablation(args):
+        call_order.append("operator_ablation")
         captured["operator_ablation"] = args
         payload = {
             "best_avg_accuracy": {"strategy": "sinkhorn_topk", "value": 0.54},
@@ -147,6 +182,12 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_suite, "run_ablation", fake_run_ablation)
     monkeypatch.setattr(paper_suite, "run_operator_ablation", fake_run_operator_ablation)
 
+    def fake_collect_git_provenance():
+        call_order.append("git")
+        return {"commit": "abc123", "dirty": False, "status_porcelain": ""}
+
+    monkeypatch.setattr(paper_suite, "collect_git_provenance", fake_collect_git_provenance)
+
     args = PipelineArgs(
         output_dir=str(output_dir),
         candidate_profile="retention_no_transport",
@@ -156,6 +197,8 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
         transport_weight=0.2,
     )
     results = paper_suite.run_pipeline(args)
+
+    assert call_order[:2] == ["git", "benchmark"]
 
     for stage_name in ("benchmark", "ablation", "operator_ablation"):
         stage_args = captured[stage_name]
@@ -170,12 +213,31 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
     assert manifest["resolved_config"]["prototype_top_k"] == 1
     assert manifest["resolved_config"]["transport_weight"] == 0.0
     assert manifest["candidate_profile"] == "retention_no_transport"
+    provenance = manifest["provenance"]
+    assert provenance["argv"]
+    assert provenance["python_version"]
+    assert provenance["torch_version"]
+    assert provenance["started_at_utc"]
+    assert provenance["finished_at_utc"]
+    assert provenance["git"]["commit"]
+    assert isinstance(provenance["git"]["dirty"], bool)
+    assert provenance["git"]["dirty"] is False
+    assert provenance["dataset"] == {
+        "name": "split_ag_news",
+        "classes_per_task": 2,
+        "max_train_samples": 64,
+        "max_val_samples": 32,
+        "num_seeds": 2,
+        "seed": 42,
+    }
+    assert provenance["output_hashes"]["continual_benchmark.json"]
+    assert provenance["output_hashes"]["continual_ablation.json"]
+    assert provenance["output_hashes"]["continual_operator_ablation.json"]
 
     report_text = Path(results["report_path"]).read_text(encoding="utf-8")
     assert "Candidate profile: `retention_no_transport`" in report_text
     assert "Prototype layout: `num_prototypes=0, slots_per_task=2, top_k=1`" in report_text
     assert "Transport weight: `0.0`" in report_text
-
 
 
 def test_run_pipeline_syncs_appendix_outputs(tmp_path, monkeypatch):
