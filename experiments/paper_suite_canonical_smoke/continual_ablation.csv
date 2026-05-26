@@ -1,0 +1,6 @@
+strategy,routing_mode,num_runs,avg_accuracy_mean,avg_accuracy_std,avg_forgetting_mean,avg_forgetting_std,backward_transfer_mean,backward_transfer_std,final_stage_forgetting_mean,final_stage_forgetting_std,final_transport_gap_mean,final_transport_gap_std,final_routing_stability_mean,final_routing_stability_std
+task_routing,task,1,0.625,0.0,-0.25,0.0,0.25,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+no_adaptation,prototype,1,0.5,0.0,0.25,0.0,-0.25,0.0,0.25,0.0,0.023638147860765457,0.0,0.7952829003334045,0.0
+correlation,prototype,1,0.5,0.0,0.25,0.0,-0.25,0.0,0.25,0.0,0.024006683379411697,0.0,0.7952829003334045,0.0
+dual_transport,prototype,1,0.5,0.0,0.25,0.0,-0.25,0.0,0.25,0.0,0.023638147860765457,0.0,0.7952829003334045,0.0
+meta_secant,prototype,1,0.5,0.0,0.25,0.0,-0.25,0.0,0.25,0.0,0.02402377314865589,0.0,0.7952829003334045,0.0

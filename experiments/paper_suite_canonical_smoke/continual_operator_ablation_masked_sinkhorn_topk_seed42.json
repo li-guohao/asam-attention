@@ -1,0 +1,1121 @@
+{
+  "config": {
+    "dataset_name": "split_ag_news",
+    "classes_per_task": 2,
+    "max_length": 64,
+    "batch_size": 4,
+    "max_train_samples": 16,
+    "max_val_samples": 8,
+    "num_workers": 0,
+    "dim": 32,
+    "num_heads": 2,
+    "num_layers": 1,
+    "top_k_patterns": 2,
+    "routing_mode": "prototype",
+    "prototype_routing_strategy": "masked_sinkhorn_topk",
+    "num_prototypes": 0,
+    "prototype_slots_per_task": 2,
+    "prototype_top_k": 1,
+    "learning_rate": 0.0003,
+    "epochs_per_task": 1,
+    "overlap_weight": 0.1,
+    "stability_weight": 0.1,
+    "balance_weight": 0.05,
+    "diversity_weight": 0.05,
+    "transport_weight": 0.05,
+    "replay_batch_size": 4,
+    "prototype_reset_threshold": 0.01,
+    "prototype_split_threshold": 0.2,
+    "prototype_noise_scale": 0.05,
+    "prototype_merge_threshold": 0.9,
+    "prototype_merge_usage_threshold": 0.1,
+    "prototype_masked_sinkhorn_candidate_k": 0,
+    "prototype_birkhoff_transport_strength": 0.02,
+    "prototype_birkhoff_adaptive_gate": true,
+    "prototype_birkhoff_gap_target": 0.03,
+    "prototype_birkhoff_max_applied_offdiag_mass": 0.006,
+    "prototype_birkhoff_gap_tolerance": 0.0,
+    "prototype_birkhoff_min_effective_strength": 0.0001,
+    "prototype_prior_strength": 1.0,
+    "prototype_capacity_blend": 0.5,
+    "prototype_masked_sinkhorn_capacity_bias": 0.0,
+    "prototype_relocation_strength": 0.75,
+    "adaptive_hyperparameters": false,
+    "adaptation_strategy": "correlation",
+    "adaptation_warmup_stages": 1,
+    "target_stage_forgetting": 0.05,
+    "prior_strength_step": 0.25,
+    "capacity_blend_step": 0.1,
+    "relocation_strength_step": 0.1,
+    "meta_transport_weight": 0.5,
+    "meta_transport_loss_weight": 0.25,
+    "meta_excess_weight": 0.25,
+    "meta_routing_weight": 0.25,
+    "meta_secant_mix": 0.25,
+    "meta_secant_eps": 0.001,
+    "transport_weight_step": 0.5,
+    "prototype_topk_step": 2.5,
+    "dual_transport_trend_weight": 0.5,
+    "dual_transport_gap_weight": 0.25,
+    "dual_transport_loss_weight": 0.25,
+    "dual_topk_min_stages": 3,
+    "dual_topk_threshold": 0.35,
+    "device": "cpu",
+    "seed": 42,
+    "output_json": "experiments\\paper_suite_canonical_smoke\\continual_operator_ablation_masked_sinkhorn_topk_seed42.json"
+  },
+  "resolved_prototype_layout": {
+    "num_prototypes": 4,
+    "prototype_top_k": 1,
+    "prototype_slots_per_task": 2
+  },
+  "num_tasks": 2,
+  "accuracy_matrix": [
+    [
+      0.75,
+      0.0
+    ],
+    [
+      0.5,
+      0.5
+    ]
+  ],
+  "stage_training_metrics": [
+    {
+      "train_loss": 0.8841336965560913,
+      "overlap_loss": 0.5522079467773438,
+      "stability_loss": 0.35722675919532776,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.007194396574050188,
+      "transport_loss": 0.5176981277763844,
+      "weighted_transport_loss": 0.025884906062856317,
+      "effective_transport_weight": 0.05,
+      "routing_stability_loss": 0.3564591705799103
+    },
+    {
+      "train_loss": 0.8141625821590424,
+      "overlap_loss": 0.5360849797725677,
+      "stability_loss": 0.017197490204125643,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.009976352099329233,
+      "transport_loss": 0.06059965491294861,
+      "weighted_transport_loss": 0.003029982792213559,
+      "effective_transport_weight": 0.05,
+      "routing_stability_loss": 0.013312571682035923
+    }
+  ],
+  "prototype_lifecycle": [
+    {
+      "reset_count": 2,
+      "split_count": 0,
+      "merge_count": 1,
+      "mean_transport_gap": 0.0,
+      "max_transport_gap": 0.0,
+      "mean_excess": 0.0,
+      "mean_merge_similarity": 0.9405107498168945,
+      "birkhoff_base_strength": 0.02,
+      "birkhoff_strength": 0.0,
+      "birkhoff_gate_factor": 0.0,
+      "birkhoff_offdiag_mass": 0.000985347549431026,
+      "birkhoff_applied_offdiag_mass": 0.0,
+      "birkhoff_row_error": 2.980232238769531e-07,
+      "birkhoff_col_error": 0.0,
+      "birkhoff_pre_gap": 0.0,
+      "birkhoff_post_gap": 0.0,
+      "birkhoff_gap_delta": 0.0
+    },
+    {
+      "reset_count": 2,
+      "split_count": 1,
+      "merge_count": 1,
+      "mean_transport_gap": 0.0,
+      "max_transport_gap": 0.0,
+      "mean_excess": 0.0,
+      "mean_merge_similarity": 0.9999998807907104,
+      "birkhoff_base_strength": 0.02,
+      "birkhoff_strength": 0.0,
+      "birkhoff_gate_factor": 0.0,
+      "birkhoff_offdiag_mass": 0.0007662258576601744,
+      "birkhoff_applied_offdiag_mass": 0.0,
+      "birkhoff_row_error": 1.1920928955078125e-07,
+      "birkhoff_col_error": 0.0,
+      "birkhoff_pre_gap": 0.0,
+      "birkhoff_post_gap": 0.0,
+      "birkhoff_gap_delta": 0.0
+    }
+  ],
+  "prototype_diagnostics": [
+    {
+      "task_prototype_heatmap": [
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "task_routing_entropy": [
+        4.1446532122790813e-05
+      ],
+      "task_transport_gap": [
+        0.0
+      ],
+      "task_max_transport_gap": [
+        0.0
+      ],
+      "task_transport_loss": [
+        0.0930376648902893
+      ],
+      "task_candidate_support_residual": [
+        0.19138598442077637
+      ],
+      "task_support_residual_delta": [
+        0.0
+      ],
+      "task_support_projection_residual": [
+        0.19138598442077637
+      ],
+      "task_effective_capacity_residual": [
+        0.0
+      ],
+      "task_support_density": [
+        0.25
+      ],
+      "task_support_size": [
+        1.0
+      ],
+      "task_support_active_prototypes": [
+        1.0
+      ],
+      "task_support_weight_leakage": [
+        1.0414482355117798
+      ],
+      "task_capacity_bias_selection_rate": [
+        0.0
+      ],
+      "layer_similarity": [
+        [
+          [
+            0.9999999403953552,
+            -0.11733096092939377,
+            -0.19462957978248596,
+            0.10883456468582153
+          ],
+          [
+            -0.11733096092939377,
+            1.0,
+            -0.08718861639499664,
+            0.08494555205106735
+          ],
+          [
+            -0.19462957978248596,
+            -0.08718861639499664,
+            1.0000001192092896,
+            0.041456013917922974
+          ],
+          [
+            0.10883456468582153,
+            0.08494555205106735,
+            0.041456013917922974,
+            1.000000238418579
+          ]
+        ]
+      ],
+      "layer_usage_ema": [
+        [
+          0.0,
+          0.1899999976158142,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_capacity_ema": [
+        [
+          0.0,
+          0.1899999976158142,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_support_ema": [
+        [
+          0.0,
+          0.1811312437057495,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_excess_ema": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_latent_ema": [
+        [
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            -0.018065428361296654,
+            0.01582386903464794,
+            -0.028200186789035797,
+            0.25477588176727295,
+            0.03152943029999733,
+            0.012587676756083965,
+            -0.03235533833503723,
+            0.12904193997383118,
+            -0.07969868928194046,
+            -0.1004527136683464,
+            -0.20522135496139526,
+            -0.02895665168762207,
+            -0.1450265794992447,
+            0.0066438294015824795,
+            0.019125916063785553,
+            0.15120908617973328,
+            -0.1499095857143402,
+            0.0029937075451016426,
+            -0.05463070794939995,
+            -0.017845580354332924,
+            0.1266925185918808,
+            0.00020498466619756073,
+            0.1678895652294159,
+            0.05701984837651253,
+            0.06958188116550446,
+            -0.14022812247276306,
+            -0.16660889983177185,
+            -0.035928454250097275,
+            -0.3160524070262909,
+            0.17215393483638763,
+            -0.005424802657216787,
+            -0.04482915997505188,
+            -0.11016052216291428,
+            0.05618351697921753,
+            0.03133717551827431,
+            0.018505007028579712,
+            -0.10137363523244858,
+            0.07696735113859177,
+            -0.05022371932864189,
+            0.052023377269506454,
+            -0.026285473257303238,
+            0.343967080116272,
+            -0.09180622547864914,
+            0.1978612244129181,
+            0.06354302912950516,
+            0.038288261741399765,
+            0.05376192927360535,
+            -0.06796253472566605,
+            0.2939305901527405,
+            0.05442752689123154,
+            0.07616400718688965,
+            0.06083047389984131,
+            0.1585540771484375,
+            0.05707855895161629,
+            -0.20479482412338257,
+            0.25638964772224426,
+            -0.09527920186519623,
+            -0.11663345247507095,
+            0.1636907309293747,
+            -0.04613131657242775,
+            -0.21713316440582275,
+            0.02414192631840706,
+            0.01870589703321457,
+            -0.022606100887060165
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ]
+      ]
+    },
+    {
+      "task_prototype_heatmap": [
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "task_routing_entropy": [
+        4.1446532122790813e-05,
+        4.1446532122790813e-05
+      ],
+      "task_transport_gap": [
+        0.0,
+        0.0
+      ],
+      "task_max_transport_gap": [
+        0.0,
+        0.0
+      ],
+      "task_transport_loss": [
+        0.0935049057006836,
+        0.04658244550228119
+      ],
+      "task_candidate_support_residual": [
+        0.18966202437877655,
+        0.18966202437877655
+      ],
+      "task_support_residual_delta": [
+        0.0,
+        0.0
+      ],
+      "task_support_projection_residual": [
+        0.18966202437877655,
+        0.18966202437877655
+      ],
+      "task_effective_capacity_residual": [
+        0.0,
+        0.0
+      ],
+      "task_support_density": [
+        0.25,
+        0.25
+      ],
+      "task_support_size": [
+        1.0,
+        1.0
+      ],
+      "task_support_active_prototypes": [
+        1.0,
+        1.0
+      ],
+      "task_support_weight_leakage": [
+        0.9713171124458313,
+        0.7984117865562439
+      ],
+      "task_capacity_bias_selection_rate": [
+        0.0,
+        0.0
+      ],
+      "layer_similarity": [
+        [
+          [
+            1.0,
+            -0.10502982139587402,
+            -0.10772718489170074,
+            0.009646273218095303
+          ],
+          [
+            -0.10502982139587402,
+            1.0,
+            -0.05378454178571701,
+            0.02721470780670643
+          ],
+          [
+            -0.10772718489170074,
+            -0.05378454178571701,
+            1.0,
+            -0.29248687624931335
+          ],
+          [
+            0.009646273218095303,
+            0.02721470780670643,
+            -0.29248687624931335,
+            1.0
+          ]
+        ]
+      ],
+      "layer_usage_ema": [
+        [
+          0.0,
+          0.34389999508857727,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_capacity_ema": [
+        [
+          0.0,
+          0.34389999508857727,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_support_ema": [
+        [
+          0.0,
+          0.3154579997062683,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_excess_ema": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "layer_latent_ema": [
+        [
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            -0.013333216309547424,
+            0.01953521929681301,
+            -0.03342841938138008,
+            0.2480088323354721,
+            0.02667943201959133,
+            0.018658213317394257,
+            -0.029358047991991043,
+            0.13343700766563416,
+            -0.0891546756029129,
+            -0.1007758378982544,
+            -0.20037712156772614,
+            -0.028995826840400696,
+            -0.14572089910507202,
+            0.008949820883572102,
+            0.018749503418803215,
+            0.14314022660255432,
+            -0.15813641250133514,
+            0.004016499035060406,
+            -0.0606076717376709,
+            -0.017543092370033264,
+            0.12438009679317474,
+            -0.007609354332089424,
+            0.16340918838977814,
+            0.060483574867248535,
+            0.07163494825363159,
+            -0.1393422782421112,
+            -0.17269417643547058,
+            -0.03809385746717453,
+            -0.32186388969421387,
+            0.1748746782541275,
+            -0.005591202061623335,
+            -0.04821944236755371,
+            -0.11124830693006516,
+            0.051425568759441376,
+            0.03076767362654209,
+            0.024501560255885124,
+            -0.09481794387102127,
+            0.08283424377441406,
+            -0.05046079307794571,
+            0.06008492037653923,
+            -0.021120017394423485,
+            0.3412819802761078,
+            -0.09020468592643738,
+            0.19661371409893036,
+            0.06043816730380058,
+            0.0402819961309433,
+            0.05336708575487137,
+            -0.0656929612159729,
+            0.2905062735080719,
+            0.05556588992476463,
+            0.074086993932724,
+            0.06382474303245544,
+            0.16111963987350464,
+            0.06219986081123352,
+            -0.20020213723182678,
+            0.25213322043418884,
+            -0.09446708112955093,
+            -0.12019592523574829,
+            0.16901065409183502,
+            -0.04571522772312164,
+            -0.21944648027420044,
+            0.015413064509630203,
+            0.0226247850805521,
+            -0.02004619874060154
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ]
+      ]
+    }
+  ],
+  "theory_diagnostics": {
+    "stage_forgetting": [
+      0.0,
+      0.25
+    ],
+    "stage_avg_accuracy": [
+      0.75,
+      0.5
+    ],
+    "stage_task_forgetting": [
+      [
+        0.0
+      ],
+      [
+        0.25,
+        0.0
+      ]
+    ],
+    "stage_transport_gap": [
+      0.0,
+      0.0
+    ],
+    "stage_max_transport_gap": [
+      0.0,
+      0.0
+    ],
+    "stage_routing_stability_loss": [
+      0.3564591705799103,
+      0.013312571682035923
+    ],
+    "stage_stability_loss": [
+      0.35722675919532776,
+      0.017197490204125643
+    ],
+    "stage_overlap_loss": [
+      0.5522079467773438,
+      0.5360849797725677
+    ],
+    "stage_transport_loss": [
+      0.5176981277763844,
+      0.06059965491294861
+    ],
+    "stage_weighted_transport_loss": [
+      0.025884906062856317,
+      0.003029982792213559
+    ],
+    "stage_candidate_support_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_support_projection_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_support_residual_delta": [
+      0.0,
+      0.0
+    ],
+    "stage_target_capacity_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_effective_capacity_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_support_density": [
+      0.0,
+      0.0
+    ],
+    "stage_support_size": [
+      0.0,
+      0.0
+    ],
+    "stage_support_active_prototypes": [
+      0.0,
+      0.0
+    ],
+    "stage_support_weight_leakage": [
+      0.0,
+      0.0
+    ],
+    "stage_capacity_bias_selection_rate": [
+      0.0,
+      0.0
+    ],
+    "stage_task_transport_gap": [
+      [
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "stage_task_max_transport_gap": [
+      [
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "stage_task_transport_loss": [
+      [
+        0.0930376648902893
+      ],
+      [
+        0.0935049057006836,
+        0.04658244550228119
+      ]
+    ],
+    "stage_merge_count": [
+      1.0,
+      1.0
+    ],
+    "stage_birkhoff_base_strength": [
+      0.02,
+      0.02
+    ],
+    "stage_birkhoff_strength": [
+      0.0,
+      0.0
+    ],
+    "stage_birkhoff_gate_factor": [
+      0.0,
+      0.0
+    ],
+    "stage_birkhoff_offdiag_mass": [
+      0.000985347549431026,
+      0.0007662258576601744
+    ],
+    "stage_birkhoff_applied_offdiag_mass": [
+      0.0,
+      0.0
+    ],
+    "stage_birkhoff_row_error": [
+      2.980232238769531e-07,
+      1.1920928955078125e-07
+    ],
+    "stage_birkhoff_col_error": [
+      0.0,
+      0.0
+    ],
+    "stage_birkhoff_gap_delta": [
+      0.0,
+      0.0
+    ],
+    "stage_mean_abs_excess": [
+      0.0,
+      0.0
+    ],
+    "stage_routing_entropy": [
+      4.1446532122790813e-05,
+      4.1446532122790813e-05
+    ],
+    "forgetting_correlations": {
+      "routing_stability": -1.0,
+      "stability_loss": -0.9999999999999999,
+      "transport_gap": null,
+      "transport_loss": -0.9999999999999998,
+      "weighted_transport_loss": -0.9999999999999998,
+      "candidate_support_residual": null,
+      "support_projection_residual": null,
+      "support_residual_delta": null,
+      "target_capacity_residual": null,
+      "effective_capacity_residual": null,
+      "support_density": null,
+      "support_size": null,
+      "support_active_prototypes": null,
+      "support_weight_leakage": null,
+      "capacity_bias_selection_rate": null,
+      "max_transport_gap": null,
+      "mean_abs_excess": null,
+      "merge_count": null,
+      "routing_entropy": null
+    }
+  },
+  "hyperparameter_history": [],
+  "final_hyperparameters": {
+    "prototype_prior_strength": 1.0,
+    "prototype_capacity_blend": 0.5,
+    "prototype_masked_sinkhorn_capacity_bias": 0.0,
+    "prototype_relocation_strength": 0.75,
+    "prototype_merge_threshold": 0.9,
+    "prototype_merge_usage_threshold": 0.1,
+    "prototype_top_k": 1,
+    "transport_weight": 0.05,
+    "task_transport_weights": [
+      0.05,
+      0.05
+    ]
+  },
+  "avg_accuracy": 0.5,
+  "avg_forgetting": 0.25,
+  "backward_transfer": -0.25,
+  "plot_path": "experiments\\paper_suite_canonical_smoke\\continual_operator_ablation_masked_sinkhorn_topk_seed42_plots.png",
+  "report_path": "experiments\\paper_suite_canonical_smoke\\continual_operator_ablation_masked_sinkhorn_topk_seed42_report.md"
+}
