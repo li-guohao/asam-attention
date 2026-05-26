@@ -263,7 +263,16 @@ class PrototypeSparseGate(nn.Module):
         col_mass = target_capacity.to(device=logits.device, dtype=logits.dtype)
         col_mass = col_mass / col_mass.sum().clamp_min(1e-6)
 
-        kernel = torch.exp(logits / max(self.sinkhorn_epsilon, 1e-6)).clamp_min(1e-9)
+        scaled_logits = logits / max(self.sinkhorn_epsilon, 1e-6)
+        row_max = scaled_logits.max(dim=-1, keepdim=True).values
+        row_max = torch.where(torch.isfinite(row_max), row_max, torch.zeros_like(row_max))
+        stabilized_logits = torch.nan_to_num(
+            scaled_logits - row_max,
+            nan=0.0,
+            posinf=0.0,
+            neginf=-80.0,
+        ).clamp(min=-80.0, max=0.0)
+        kernel = torch.exp(stabilized_logits).clamp_min(1e-9)
         u = torch.ones_like(row_mass)
         v = torch.ones_like(col_mass)
         for _ in range(max(1, self.sinkhorn_iters)):
@@ -282,6 +291,39 @@ class PrototypeSparseGate(nn.Module):
         dense_weights = self._sinkhorn_transport_weights(logits, target_capacity)
         sparse_weights, support = self._topk_project_probabilities(dense_weights)
         return sparse_weights, support, target_capacity
+
+    def _route_with_sinkhorn_support_masked(
+        self,
+        logits: torch.Tensor,
+        routing_prior: torch.Tensor,
+        return_diagnostics: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
+        target_capacity = self._build_capacity_target(routing_prior)
+        with torch.no_grad():
+            proposal_weights = self._sinkhorn_transport_weights(
+                logits.detach(),
+                target_capacity.detach(),
+            )
+            _, support = self._topk_project_probabilities(proposal_weights)
+        effective_capacity = self._project_capacity_to_support(target_capacity, support)
+        weights = self._masked_sinkhorn_transport_weights(
+            logits=logits,
+            target_capacity=effective_capacity,
+            support=support,
+        )
+        if not return_diagnostics:
+            return weights, support, effective_capacity
+        diagnostics = self._build_support_diagnostics(
+            logits=logits,
+            target_capacity=target_capacity,
+            prototype_weights=weights,
+            prototype_support=support,
+            prototype_capacity=effective_capacity,
+            candidate_support=support,
+            proposal_weights=proposal_weights,
+            biased_support_selected=False,
+        )
+        return weights, support, effective_capacity, diagnostics
 
     def _topk_support_from_scores(
         self,
@@ -529,6 +571,14 @@ class PrototypeSparseGate(nn.Module):
         elif self.routing_strategy == "masked_sinkhorn_topk":
             prototype_weights, prototype_support, prototype_capacity, support_diagnostics = (
                 self._route_with_masked_sinkhorn(
+                    proximal_logits,
+                    routing_prior,
+                    return_diagnostics=True,
+                )
+            )
+        elif self.routing_strategy == "sinkhorn_support_masked":
+            prototype_weights, prototype_support, prototype_capacity, support_diagnostics = (
+                self._route_with_sinkhorn_support_masked(
                     proximal_logits,
                     routing_prior,
                     return_diagnostics=True,

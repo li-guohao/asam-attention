@@ -84,6 +84,13 @@ OPERATOR_STRATEGIES = [
         "prototype_relocation_strength": 0.75,
     },
     {
+        "name": "sinkhorn_support_masked",
+        "prototype_routing_strategy": "sinkhorn_support_masked",
+        "transport_weight": 0.05,
+        "prototype_merge_usage_threshold": 0.1,
+        "prototype_relocation_strength": 0.75,
+    },
+    {
         "name": "no_transport",
         "prototype_routing_strategy": "sinkhorn_topk",
         "transport_weight": 0.0,
@@ -355,6 +362,7 @@ def build_report(summary: Dict[str, object]) -> str:
         "- `sinkhorn_topk` is the full capacity-aware routing baseline.",
         "- `kl_topk` removes Sinkhorn balancing while keeping sparse prototype routing.",
         "- `masked_sinkhorn_topk` runs Sinkhorn directly on the sparse top-k support.",
+        "- `sinkhorn_support_masked` uses dense Sinkhorn to select top-k support, then masked Sinkhorn reroutes on that support.",
         "- `no_transport` disables the transport-loss training term.",
         "- `no_merge` disables merge events through `prototype_merge_usage_threshold=0`.",
         "- `no_relocation` disables relocation updates through `prototype_relocation_strength=0`.",

@@ -6,8 +6,8 @@ from dataclasses import replace
 
 import torch
 
-from asam import ContinualASAMConfig, ContinualASAMLayer, PrototypeContinualASAMLayer
 import asam.continual_asam as continual_asam_module
+from asam import ContinualASAMConfig, ContinualASAMLayer, PrototypeContinualASAMLayer
 from asam.continual_asam import PrototypeSparseGate
 
 
@@ -76,7 +76,9 @@ def test_overlap_regularization_uses_seen_task_memory_without_mixed_batch():
     previous_x = torch.randn(2, 10, 32)
     previous_task_ids = torch.tensor([0, 0])
     _, previous_info = layer(previous_x, task_ids=previous_task_ids, return_info=True)
-    layer.update_task_memory(previous_task_ids, previous_info["head_importance"], previous_info["pattern_weights"])
+    layer.update_task_memory(
+        previous_task_ids, previous_info["head_importance"], previous_info["pattern_weights"]
+    )
 
     current_x = torch.randn(2, 10, 32)
     current_task_ids = torch.tensor([1, 1])
@@ -120,15 +122,23 @@ def test_grouped_task_attention_matches_legacy_forward_and_backward():
     assert torch.allclose(grouped_out, legacy_out, atol=1e-6, rtol=1e-5)
     assert torch.equal(grouped_info["task_pattern_masks"], legacy_info["task_pattern_masks"])
     assert torch.allclose(grouped_info["pattern_logits"], legacy_info["pattern_logits"], atol=1e-6)
-    assert torch.allclose(grouped_info["pattern_weights"], legacy_info["pattern_weights"], atol=1e-6)
-    assert torch.allclose(grouped_info["head_importance"], legacy_info["head_importance"], atol=1e-6)
+    assert torch.allclose(
+        grouped_info["pattern_weights"], legacy_info["pattern_weights"], atol=1e-6
+    )
+    assert torch.allclose(
+        grouped_info["head_importance"], legacy_info["head_importance"], atol=1e-6
+    )
 
     legacy_out.square().mean().backward()
     grouped_out.square().mean().backward()
 
     assert torch.allclose(grouped_x.grad, legacy_x.grad, atol=1e-6, rtol=1e-5)
-    assert torch.allclose(grouped.to_qkv.weight.grad, legacy.to_qkv.weight.grad, atol=1e-6, rtol=1e-5)
-    assert torch.allclose(grouped.to_out[0].weight.grad, legacy.to_out[0].weight.grad, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(
+        grouped.to_qkv.weight.grad, legacy.to_qkv.weight.grad, atol=1e-6, rtol=1e-5
+    )
+    assert torch.allclose(
+        grouped.to_out[0].weight.grad, legacy.to_out[0].weight.grad, atol=1e-6, rtol=1e-5
+    )
 
 
 def test_grouped_task_attention_reuses_indices_for_repeated_signatures(monkeypatch):
@@ -155,7 +165,9 @@ def test_grouped_task_attention_reuses_indices_for_repeated_signatures(monkeypat
         calls += 1
         return original(pattern_mask)
 
-    monkeypatch.setattr(continual_asam_module, "pattern_mask_to_indices", counted_pattern_mask_to_indices)
+    monkeypatch.setattr(
+        continual_asam_module, "pattern_mask_to_indices", counted_pattern_mask_to_indices
+    )
 
     x = torch.randn(6, 10, 32)
     task_ids = torch.tensor([0, 1, 2, 3, 0, 1])
@@ -236,8 +248,12 @@ def test_grouped_prototype_attention_matches_legacy_forward_with_head_mask():
     grouped_out, grouped_info = grouped(x, mask=mask, return_info=True)
 
     assert torch.allclose(grouped_out, legacy_out, atol=1e-6, rtol=1e-5)
-    assert torch.equal(grouped_info["prototype_pattern_masks"], legacy_info["prototype_pattern_masks"])
-    assert torch.allclose(grouped_info["prototype_weights"], legacy_info["prototype_weights"], atol=1e-6)
+    assert torch.equal(
+        grouped_info["prototype_pattern_masks"], legacy_info["prototype_pattern_masks"]
+    )
+    assert torch.allclose(
+        grouped_info["prototype_weights"], legacy_info["prototype_weights"], atol=1e-6
+    )
     assert torch.equal(grouped_info["prototype_support"], legacy_info["prototype_support"])
     assert torch.allclose(
         grouped_info["transport_loss_per_sample"],
@@ -469,6 +485,97 @@ def test_masked_sinkhorn_reduces_capacity_violation_vs_dense_then_projected_topk
     assert torch.all(masked_weights.masked_select(~projected_support) == 0.0)
 
 
+def test_sinkhorn_support_masked_reroutes_on_sinkhorn_selected_support():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.6,
+        sinkhorn_iters=120,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [3.2677, 3.8614, 2.3063, -1.2405],
+            [4.0473, 2.8137, 0.5810, -0.8240],
+            [1.0048, 2.7836, 3.9056, -1.1163],
+            [1.0687, 2.8433, 3.8704, -1.3008],
+            [1.4607, -0.8482, 3.7879, 2.5868],
+            [0.6765, -2.2819, 3.0467, 5.2454],
+        ]
+    )
+    routing_prior = torch.tensor([[0.4, 0.3, 0.2, 0.1]] * 6)
+    target_capacity = gate._build_capacity_target(routing_prior)
+    dense_weights = gate._sinkhorn_transport_weights(logits, target_capacity)
+    projected_weights, dense_support = gate._topk_project_probabilities(dense_weights)
+    logits_support = gate._build_masked_sinkhorn_support(logits)
+
+    weights, support, effective_capacity, diagnostics = gate._route_with_sinkhorn_support_masked(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
+
+    dense_projected_violation = (projected_weights.mean(dim=0) - target_capacity).abs().mean()
+    rerouted_violation = (weights.mean(dim=0) - effective_capacity).abs().mean()
+
+    assert torch.equal(support, dense_support)
+    assert not torch.equal(support, logits_support)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
+    assert torch.allclose(
+        effective_capacity,
+        gate._project_capacity_to_support(target_capacity, support),
+        atol=1e-6,
+    )
+    assert rerouted_violation < 1e-3
+    assert rerouted_violation < dense_projected_violation * 0.1
+    assert torch.isclose(
+        diagnostics["support_weight_leakage"],
+        dense_weights.masked_select(~support).abs().sum(),
+        atol=1e-6,
+    )
+    assert diagnostics["support_weight_leakage"] > 0.0
+
+
+def test_sinkhorn_support_masked_handles_extreme_proposal_logits():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.01,
+        sinkhorn_iters=60,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [1200.0, 900.0, -1200.0, -900.0],
+            [1100.0, 800.0, -1100.0, -800.0],
+            [-900.0, -1200.0, 900.0, 1200.0],
+            [-800.0, -1100.0, 800.0, 1100.0],
+        ]
+    )
+    routing_prior = torch.tensor([[0.4, 0.1, 0.1, 0.4]] * logits.size(0))
+
+    weights, support, effective_capacity, diagnostics = gate._route_with_sinkhorn_support_masked(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
+
+    assert torch.isfinite(weights).all()
+    assert torch.isfinite(effective_capacity).all()
+    assert torch.isfinite(diagnostics["support_weight_leakage"])
+    assert torch.all(weights.masked_select(~support) == 0.0)
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
+
+
 def test_masked_sinkhorn_infeasible_support_is_finite_and_row_normalized():
     gate = PrototypeSparseGate(
         dim=16,
@@ -596,7 +703,9 @@ def test_masked_sinkhorn_degenerates_to_sinkhorn_when_support_is_dense():
     )
     routing_prior = torch.full_like(logits, 1.0 / logits.size(-1))
 
-    masked_weights, masked_support, masked_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+    masked_weights, masked_support, masked_capacity = gate._route_with_masked_sinkhorn(
+        logits, routing_prior
+    )
     dense_weights, dense_support, dense_capacity = gate._route_with_sinkhorn(logits, routing_prior)
 
     assert torch.allclose(masked_weights, dense_weights, atol=1e-6)
@@ -673,7 +782,9 @@ def test_prototype_routing_is_topk_sparse_and_memory_biased():
 
 
 def test_prototype_memory_update_enables_stability_regularization():
-    config = ContinualASAMConfig(dim=32, num_heads=2, dim_head=16, num_prototypes=4, prototype_embed_dim=16)
+    config = ContinualASAMConfig(
+        dim=32, num_heads=2, dim_head=16, num_prototypes=4, prototype_embed_dim=16
+    )
     layer = PrototypeContinualASAMLayer(config)
 
     x = torch.randn(2, 10, 32)
@@ -693,7 +804,9 @@ def test_prototype_memory_update_enables_stability_regularization():
 
 
 def test_prototype_memory_tracks_capacity_and_support_statistics():
-    config = ContinualASAMConfig(dim=32, num_heads=2, dim_head=16, num_prototypes=4, prototype_embed_dim=16)
+    config = ContinualASAMConfig(
+        dim=32, num_heads=2, dim_head=16, num_prototypes=4, prototype_embed_dim=16
+    )
     layer = PrototypeContinualASAMLayer(config)
 
     head_importance = torch.tensor([[0.8, 0.2], [0.6, 0.4]])
@@ -721,7 +834,9 @@ def test_prototype_memory_tracks_capacity_and_support_statistics():
 
 
 def test_prototype_regularizers_are_finite_and_non_negative():
-    config = ContinualASAMConfig(dim=32, num_heads=2, dim_head=16, num_prototypes=4, prototype_embed_dim=16)
+    config = ContinualASAMConfig(
+        dim=32, num_heads=2, dim_head=16, num_prototypes=4, prototype_embed_dim=16
+    )
     layer = PrototypeContinualASAMLayer(config)
 
     x = torch.randn(3, 12, 32)
@@ -911,7 +1026,6 @@ def test_prototype_prior_can_shift_toward_task_conditioned_capacity_memory():
     assert torch.allclose(task_prior.sum(dim=-1), torch.ones(1), atol=1e-6)
 
 
-
 def test_classifier_propagates_task_transport_weights_to_prototype_layers():
     from experiments.train_continual_asam import ContinualTextClassifier
 
@@ -928,7 +1042,9 @@ def test_classifier_propagates_task_transport_weights_to_prototype_layers():
     )
     model.set_task_transport_weights([0.05, 0.2, 0.1], base_weight=0.05)
 
-    prototype_layer = next(layer for layer in model.layers if isinstance(layer, PrototypeContinualASAMLayer))
+    prototype_layer = next(
+        layer for layer in model.layers if isinstance(layer, PrototypeContinualASAMLayer)
+    )
     assert torch.allclose(
         prototype_layer.task_transport_weights,
         torch.tensor([0.05, 0.2, 0.1]),
@@ -951,7 +1067,6 @@ def test_continual_text_classifier_aggregates_transport_loss_per_sample():
         top_k_patterns=2,
         routing_mode="prototype",
     )
-
     inputs = torch.randint(0, 128, (4, 16))
     task_ids = torch.tensor([0, 1, 0, 1])
     _, info = model(inputs, task_ids=task_ids, return_info=True)
@@ -962,7 +1077,6 @@ def test_continual_text_classifier_aggregates_transport_loss_per_sample():
         info["transport_loss"],
         atol=1e-6,
     )
-
 
 
 def test_prototype_hyperparameter_round_trip_tracks_merge_controls():
