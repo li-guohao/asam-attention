@@ -11,7 +11,7 @@ import argparse
 import hashlib
 import json
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
 
 CURRENT = "CURRENT"
@@ -59,6 +59,14 @@ PATH_KEY_PARTS = {
     "tex",
     "png",
     "md",
+}
+
+TEXT_ARTIFACT_SUFFIXES = {
+    ".csv",
+    ".json",
+    ".md",
+    ".tex",
+    ".txt",
 }
 
 
@@ -113,6 +121,44 @@ def _raw_fingerprint(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _artifact_hash_bytes(path: Path) -> bytes:
+    content = path.read_bytes()
+    if path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES:
+        return content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return content
+
+
+def _artifact_fingerprint(path: Path) -> str:
+    return hashlib.sha256(_artifact_hash_bytes(path)).hexdigest()
+
+
+def _normalize_manifest_hash_key(key: str) -> str | None:
+    normalized = str(key).replace("\\", "/").strip()
+    posix_path = PurePosixPath(normalized)
+    windows_path = PureWindowsPath(normalized)
+    if (
+        not normalized
+        or posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or ".." in posix_path.parts
+    ):
+        return None
+    return posix_path.as_posix()
+
+
+def _manifest_relative_path(suite_path: Path, normalized_key: str) -> Path:
+    return suite_path.joinpath(*PurePosixPath(normalized_key).parts)
+
+
+def _is_within_directory(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _collect_values(value: Any, keys: Iterable[str]) -> set[str]:
@@ -191,6 +237,85 @@ def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
     return not missing, sorted(set(missing))
 
 
+def _audit_manifest_output_hashes(
+    suite_path: Path, manifest: dict[str, Any]
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, dict):
+        return issues
+
+    output_hashes = provenance.get("output_hashes")
+    if not isinstance(output_hashes, dict):
+        return issues
+
+    covered_json_paths: set[str] = set()
+    for raw_key, expected_hash in sorted(output_hashes.items()):
+        normalized_key = _normalize_manifest_hash_key(str(raw_key))
+        if normalized_key is None:
+            issues.append(
+                {
+                    "severity": "blocking",
+                    "suite": str(suite_path),
+                    "path": str(raw_key),
+                    "message": "manifest hash key is not a relative suite path",
+                }
+            )
+            continue
+
+        artifact_path = _manifest_relative_path(suite_path, normalized_key)
+        if not _is_within_directory(artifact_path, suite_path):
+            issues.append(
+                {
+                    "severity": "blocking",
+                    "suite": str(suite_path),
+                    "path": str(raw_key),
+                    "message": "manifest hash key is not a relative suite path",
+                }
+            )
+            continue
+
+        if artifact_path.suffix.lower() == ".json":
+            covered_json_paths.add(normalized_key)
+        if not artifact_path.is_file():
+            issues.append(
+                {
+                    "severity": "blocking",
+                    "suite": str(suite_path),
+                    "path": str(artifact_path),
+                    "message": f"hashed artifact is missing: {normalized_key}",
+                }
+            )
+            continue
+
+        actual_hash = _artifact_fingerprint(artifact_path)
+        if actual_hash != expected_hash:
+            issues.append(
+                {
+                    "severity": "blocking",
+                    "suite": str(suite_path),
+                    "path": str(artifact_path),
+                    "message": f"hash mismatch for {normalized_key}",
+                }
+            )
+
+    for json_path in sorted(suite_path.rglob("*.json")):
+        relative_json = json_path.relative_to(suite_path).as_posix()
+        if relative_json == "paper_suite_manifest.json":
+            continue
+        if relative_json not in covered_json_paths:
+            issues.append(
+                {
+                    "severity": "blocking",
+                    "suite": str(suite_path),
+                    "path": str(json_path),
+                    "message": f"JSON artifact is not covered by manifest output_hashes: {relative_json}",
+                }
+            )
+
+    return issues
+
+
 def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     blocking: list[dict[str, str]] = []
     suspicious: list[dict[str, str]] = []
@@ -233,6 +358,8 @@ def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], lis
             }
         )
         return OUTDATED, blocking, suspicious
+
+    blocking.extend(_audit_manifest_output_hashes(suite_path, manifest))
 
     ablation = _load_named_json(suite_path, "continual_ablation.json")
     operator = _load_named_json(suite_path, "continual_operator_ablation.json")

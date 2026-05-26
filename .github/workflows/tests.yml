@@ -93,7 +93,7 @@ jobs:
             --cov=asam --cov-report=xml --cov-report=term
 
       - name: Generate experiment artifact audit
-        run: python scripts/audit_experiment_artifacts.py > experiment_artifact_audit.json || true
+        run: python scripts/audit_experiment_artifacts.py experiments/paper_suite_canonical_smoke > experiment_artifact_audit.json
 
       - name: Upload diagnostic artifacts
         uses: actions/upload-artifact@v4
