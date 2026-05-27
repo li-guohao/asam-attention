@@ -485,6 +485,157 @@ def test_masked_sinkhorn_reduces_capacity_violation_vs_dense_then_projected_topk
     assert torch.all(masked_weights.masked_select(~projected_support) == 0.0)
 
 
+def _kl_to_target(capacity: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    safe_capacity = capacity.clamp_min(1e-12)
+    safe_target = target.clamp_min(1e-12)
+    return (safe_capacity * (safe_capacity / safe_target).log()).sum()
+
+
+def test_sinkhorn_support_masked_capacity_projection_respects_support_and_improves_kl():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=200,
+        capacity_blend=1.0,
+    )
+    target_capacity = torch.tensor([0.1, 0.7, 0.1, 0.1])
+    support = torch.tensor(
+        [
+            [True, True, False, False],
+            [True, False, True, False],
+            [True, False, False, True],
+            [True, False, False, True],
+        ]
+    )
+    row_average_capacity = gate._project_capacity_to_support(target_capacity, support)
+
+    projected_capacity = gate._project_capacity_to_support_sinkhorn_feasible(
+        target_capacity,
+        support,
+    )
+    feasible_weights = gate._masked_sinkhorn_transport_weights(
+        torch.zeros_like(support, dtype=target_capacity.dtype),
+        projected_capacity,
+        support,
+    )
+    caps = support.to(dtype=target_capacity.dtype).mean(dim=0)
+
+    assert torch.isfinite(projected_capacity).all()
+    assert torch.allclose(projected_capacity.sum(), torch.tensor(1.0), atol=1e-6)
+    assert torch.all(projected_capacity <= caps + 1e-6)
+    assert torch.all(projected_capacity[support.any(dim=0)] > 0.0)
+    assert torch.allclose(feasible_weights.mean(dim=0), projected_capacity, atol=1e-3)
+    assert _kl_to_target(projected_capacity, target_capacity) < _kl_to_target(
+        row_average_capacity,
+        target_capacity,
+    )
+
+
+def test_sinkhorn_support_masked_capacity_projection_never_worsens_kl_guard():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.1,
+        sinkhorn_iters=80,
+        capacity_blend=1.0,
+    )
+    generator = torch.Generator().manual_seed(123)
+    for _ in range(20):
+        target_capacity = torch.rand(4, generator=generator)
+        target_capacity = target_capacity / target_capacity.sum()
+        support = torch.rand(5, 4, generator=generator) > 0.45
+        empty_rows = ~support.any(dim=-1)
+        if empty_rows.any():
+            replacement = torch.randint(0, 4, (int(empty_rows.sum().item()),), generator=generator)
+            support[empty_rows, replacement] = True
+
+        baseline_capacity = gate._project_capacity_to_support(target_capacity, support)
+        projected_capacity = gate._project_capacity_to_support_sinkhorn_feasible(
+            target_capacity,
+            support,
+        )
+
+        assert torch.isfinite(projected_capacity).all()
+        assert torch.allclose(projected_capacity.sum(), torch.tensor(1.0), atol=1e-6)
+        assert (
+            _kl_to_target(projected_capacity, target_capacity)
+            <= _kl_to_target(
+                baseline_capacity,
+                target_capacity,
+            )
+            + 1e-6
+        )
+
+
+def test_sinkhorn_support_masked_capacity_projection_handles_empty_support_safely():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=80,
+        capacity_blend=1.0,
+    )
+    target_capacity = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    support = torch.zeros(3, 4, dtype=torch.bool)
+
+    projected_capacity = gate._project_capacity_to_support_sinkhorn_feasible(
+        target_capacity,
+        support,
+    )
+
+    assert torch.isfinite(projected_capacity).all()
+    assert torch.allclose(projected_capacity, torch.full((4,), 0.25), atol=1e-6)
+
+
+def test_sinkhorn_support_masked_capacity_projection_is_finite_with_fp16_inactive_columns():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.1,
+        sinkhorn_iters=80,
+        capacity_blend=1.0,
+    )
+    target_capacity = torch.tensor([0.1, 0.2, 0.3, 0.4], dtype=torch.float16)
+    support = torch.tensor(
+        [
+            [True, True, False, False],
+            [True, False, True, False],
+            [True, False, True, False],
+        ]
+    )
+
+    projected_capacity = gate._project_capacity_to_support_sinkhorn_feasible(
+        target_capacity,
+        support,
+    )
+
+    assert projected_capacity.dtype == target_capacity.dtype
+    assert torch.isfinite(projected_capacity).all()
+    assert torch.allclose(
+        projected_capacity.sum(),
+        torch.tensor(1.0, dtype=torch.float16),
+        atol=1e-3,
+    )
+    assert projected_capacity[3].item() == 0.0
+
+
 def test_sinkhorn_support_masked_reroutes_on_sinkhorn_selected_support():
     gate = PrototypeSparseGate(
         dim=16,
@@ -528,7 +679,7 @@ def test_sinkhorn_support_masked_reroutes_on_sinkhorn_selected_support():
     assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
     assert torch.allclose(
         effective_capacity,
-        gate._project_capacity_to_support(target_capacity, support),
+        gate._project_capacity_to_support_sinkhorn_feasible(target_capacity, support),
         atol=1e-6,
     )
     assert rerouted_violation < 1e-3
@@ -539,6 +690,83 @@ def test_sinkhorn_support_masked_reroutes_on_sinkhorn_selected_support():
         atol=1e-6,
     )
     assert diagnostics["support_weight_leakage"] > 0.0
+
+
+def test_sinkhorn_support_masked_uses_sinkhorn_feasible_capacity_projection():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=120,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [10.0, 9.0, 0.0, 0.0],
+            [10.0, 0.0, 9.0, 0.0],
+            [10.0, 0.0, 0.0, 9.0],
+            [10.0, 0.0, 0.0, 9.0],
+        ]
+    )
+    routing_prior = torch.tensor([[0.1, 0.7, 0.1, 0.1]] * logits.size(0))
+
+    weights, support, effective_capacity, diagnostics = gate._route_with_sinkhorn_support_masked(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
+    target_capacity = gate._build_capacity_target(routing_prior)
+    row_average_capacity = gate._project_capacity_to_support(target_capacity, support)
+
+    assert torch.allclose(effective_capacity, target_capacity, atol=1e-6)
+    assert _kl_to_target(effective_capacity, target_capacity) < _kl_to_target(
+        row_average_capacity,
+        target_capacity,
+    )
+    assert torch.isfinite(weights).all()
+    assert torch.all(weights.masked_select(~support) == 0.0)
+    assert torch.isfinite(diagnostics["effective_capacity_residual"])
+
+
+def test_sinkhorn_support_masked_capacity_projection_handles_hall_subset_constraints():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="sinkhorn_support_masked",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=120,
+        capacity_blend=1.0,
+    )
+    target_capacity = torch.tensor([0.45, 0.45, 0.05, 0.05])
+    support = torch.tensor(
+        [
+            [True, True, False, False],
+            [True, True, False, False],
+            [False, False, True, True],
+            [False, False, True, True],
+        ]
+    )
+
+    projected_capacity = gate._project_capacity_to_support_sinkhorn_feasible(
+        target_capacity,
+        support,
+    )
+    feasible_weights = gate._masked_sinkhorn_transport_weights(
+        torch.zeros_like(support, dtype=target_capacity.dtype),
+        projected_capacity,
+        support,
+    )
+
+    expected_capacity = torch.full((4,), 0.25)
+    assert torch.allclose(projected_capacity, expected_capacity, atol=1e-6)
+    assert torch.allclose(feasible_weights.mean(dim=0), projected_capacity, atol=1e-3)
 
 
 def test_sinkhorn_support_masked_handles_extreme_proposal_logits():

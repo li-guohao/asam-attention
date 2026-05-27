@@ -248,6 +248,66 @@ class PrototypeSparseGate(nn.Module):
         capacity = row_distribution.mean(dim=0)
         return capacity / capacity.sum().clamp_min(1e-6)
 
+    def _project_capacity_to_support_sinkhorn_feasible(
+        self,
+        target_capacity: torch.Tensor,
+        support: torch.Tensor,
+    ) -> torch.Tensor:
+        with torch.no_grad():
+            original_dtype = target_capacity.dtype
+            dtype = (
+                torch.float32
+                if target_capacity.dtype in (torch.float16, torch.bfloat16)
+                else target_capacity.dtype
+            )
+            device = target_capacity.device
+            support = support.to(device=device)
+            target_capacity = target_capacity.to(device=device, dtype=dtype)
+            active = support.any(dim=0)
+            if not active.any():
+                return torch.full_like(target_capacity, 1.0 / target_capacity.numel()).to(
+                    dtype=original_dtype
+                )
+            if not support.any(dim=-1).all():
+                safe_capacity = torch.where(
+                    active,
+                    target_capacity.clamp_min(self.prior_floor),
+                    torch.zeros_like(target_capacity),
+                )
+                safe_capacity = safe_capacity / safe_capacity.sum().clamp_min(1e-6)
+                return safe_capacity.to(dtype=original_dtype)
+
+            baseline_capacity = self._project_capacity_to_support(target_capacity, support)
+            projection_target = torch.where(
+                active,
+                target_capacity.clamp_min(self.prior_floor),
+                torch.zeros_like(target_capacity),
+            )
+            projection_target = projection_target / projection_target.sum().clamp_min(1e-6)
+            projection_logits = (
+                max(self.sinkhorn_epsilon, 1e-6)
+                * torch.log(projection_target.clamp_min(self.prior_floor))
+            ).unsqueeze(0)
+            projection_logits = projection_logits.expand(support.size(0), -1)
+            projection_weights = self._masked_sinkhorn_transport_weights(
+                logits=projection_logits,
+                target_capacity=projection_target,
+                support=support,
+            )
+            projected = projection_weights.mean(dim=0)
+            projected = projected / projected.sum().clamp_min(1e-6)
+
+            safe_target = target_capacity.clamp_min(1e-12)
+            projected_kl = (
+                projected.clamp_min(1e-12) * (projected.clamp_min(1e-12) / safe_target).log()
+            ).sum()
+            baseline_kl = (
+                baseline_capacity.clamp_min(1e-12)
+                * (baseline_capacity.clamp_min(1e-12) / safe_target).log()
+            ).sum()
+            selected = torch.where(projected_kl <= baseline_kl, projected, baseline_capacity)
+            return selected.to(dtype=original_dtype)
+
     def _sinkhorn_transport_weights(
         self,
         logits: torch.Tensor,
@@ -305,7 +365,10 @@ class PrototypeSparseGate(nn.Module):
                 target_capacity.detach(),
             )
             _, support = self._topk_project_probabilities(proposal_weights)
-        effective_capacity = self._project_capacity_to_support(target_capacity, support)
+        effective_capacity = self._project_capacity_to_support_sinkhorn_feasible(
+            target_capacity,
+            support,
+        )
         weights = self._masked_sinkhorn_transport_weights(
             logits=logits,
             target_capacity=effective_capacity,
