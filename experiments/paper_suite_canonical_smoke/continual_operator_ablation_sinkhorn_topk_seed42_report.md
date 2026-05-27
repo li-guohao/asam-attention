@@ -1,6 +1,8 @@
 # Continual Text Benchmark Report
 
 - Dataset: `split_ag_news`
+- Dataset source (train): `huggingface`
+- Dataset source (val): `huggingface`
 - Routing mode: `prototype`
 - Routing strategy: `sinkhorn_topk`
 - Tasks: `2`
@@ -25,7 +27,7 @@
 
 - Stage forgetting trace: `[0.0, 0.25]`
 - Stage transport gap trace: `[0.006203977856785059, 0.023638149723410606]`
-- Stage transport loss trace: `[0.5290975086390972, 0.07397376745939255]`
+- Stage transport loss trace: `[0.5290975086390972, 0.07397377118468285]`
 - Stage merge-count trace: `[1.0, 1.0]`
 - Stage Birkhoff base-strength trace: `[0.02, 0.02]`
 - Stage Birkhoff effective-strength trace: `[0.004166667039195697, 0.011620870936479231]`
@@ -38,6 +40,6 @@
 - Stage routing stability trace: `[0.6931285858154297, 0.7952829003334045]`
 - Forgetting vs routing stability correlation: `1.0`
 - Forgetting vs transport gap correlation: `0.9999999999999999`
-- Forgetting vs transport loss correlation: `-1.0`
+- Forgetting vs transport loss correlation: `-0.9999999999999998`
 - Forgetting vs mean abs excess correlation: `0.9999999999999999`
 - Forgetting vs merge-count correlation: `None`

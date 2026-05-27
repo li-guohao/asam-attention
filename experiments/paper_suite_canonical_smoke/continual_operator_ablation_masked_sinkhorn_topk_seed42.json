@@ -64,6 +64,24 @@
     "seed": 42,
     "output_json": "experiments\\paper_suite_canonical_smoke\\continual_operator_ablation_masked_sinkhorn_topk_seed42.json"
   },
+  "dataset_provenance": {
+    "train": {
+      "source_kind": "huggingface",
+      "split": "train",
+      "sample_count": 16,
+      "max_samples": 16,
+      "dataset_name": "ag_news",
+      "dataset_config": null
+    },
+    "val": {
+      "source_kind": "huggingface",
+      "split": "test",
+      "sample_count": 8,
+      "max_samples": 8,
+      "dataset_name": "ag_news",
+      "dataset_config": null
+    }
+  },
   "resolved_prototype_layout": {
     "num_prototypes": 4,
     "prototype_top_k": 1,
@@ -188,7 +206,7 @@
         1.0
       ],
       "task_support_weight_leakage": [
-        1.0414482355117798
+        1.5310879945755005
       ],
       "task_capacity_bias_selection_rate": [
         0.0
@@ -582,8 +600,8 @@
         1.0
       ],
       "task_support_weight_leakage": [
-        0.9713171124458313,
-        0.7984117865562439
+        1.5172961950302124,
+        1.5172961950302124
       ],
       "task_capacity_bias_selection_rate": [
         0.0,

@@ -194,6 +194,7 @@ def build_manifest_provenance(
     output_paths: Iterable[object],
     git_provenance: Optional[Dict[str, object]] = None,
     output_root: Optional[Path] = None,
+    benchmark_dataset_provenance: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
     try:
         import torch
@@ -201,6 +202,17 @@ def build_manifest_provenance(
         torch_version = torch.__version__
     except (ImportError, AttributeError):
         torch_version = "unavailable"
+
+    dataset_metadata = {
+        "name": args.dataset_name,
+        "classes_per_task": args.classes_per_task,
+        "max_train_samples": args.max_train_samples,
+        "max_val_samples": args.max_val_samples,
+        "seed": args.seed,
+        "num_seeds": args.num_seeds,
+    }
+    if benchmark_dataset_provenance is not None:
+        dataset_metadata["benchmark_provenance"] = benchmark_dataset_provenance
 
     return {
         "argv": redact_argv(sys.argv),
@@ -210,14 +222,7 @@ def build_manifest_provenance(
         "started_at_utc": started_at_utc,
         "finished_at_utc": finished_at_utc,
         "git": git_provenance or collect_git_provenance(),
-        "dataset": {
-            "name": args.dataset_name,
-            "classes_per_task": args.classes_per_task,
-            "max_train_samples": args.max_train_samples,
-            "max_val_samples": args.max_val_samples,
-            "seed": args.seed,
-            "num_seeds": args.num_seeds,
-        },
+        "dataset": dataset_metadata,
         "device": args.device,
         "output_hashes": collect_output_hashes(output_paths, output_root),
     }
@@ -393,6 +398,8 @@ def build_pipeline_report(
         "## Run Config",
         "",
         f"- Dataset: `{args.dataset_name}`",
+        f"- Dataset source (train): `{benchmark_results.get('dataset_provenance', {}).get('train', {}).get('source_kind', 'unknown')}`",
+        f"- Dataset source (val): `{benchmark_results.get('dataset_provenance', {}).get('val', {}).get('source_kind', 'unknown')}`",
         f"- Output directory: `{manifest['output_dir']}`",
         f"- Device: `{args.device}`",
         f"- Seeds for ablation: `{args.num_seeds}`",
@@ -578,6 +585,7 @@ def run_pipeline(args: PipelineArgs) -> Dict[str, object]:
         output_paths,
         git_provenance,
         output_dir,
+        benchmark_results.get("dataset_provenance"),
     )
     suite_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     suite_report.write_text(

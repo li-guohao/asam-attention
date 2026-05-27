@@ -1,6 +1,8 @@
 # Continual Text Benchmark Report
 
 - Dataset: `split_ag_news`
+- Dataset source (train): `huggingface`
+- Dataset source (val): `huggingface`
 - Routing mode: `prototype`
 - Routing strategy: `sinkhorn_topk`
 - Tasks: `2`
@@ -24,21 +26,21 @@
 ## Theory Diagnostics
 
 - Stage forgetting trace: `[0.0, 0.25]`
-- Stage transport gap trace: `[0.006203977856785059, 0.023638147860765457]`
-- Stage transport loss trace: `[0.5289209447801113, 0.07316097989678383]`
+- Stage transport gap trace: `[0.006203977856785059, 0.02356940321624279]`
+- Stage transport loss trace: `[0.5289209447801113, 0.06982749700546265]`
 - Stage merge-count trace: `[1.0, 1.0]`
 - Stage Birkhoff base-strength trace: `[0.02, 0.02]`
-- Stage Birkhoff effective-strength trace: `[0.004166667039195697, 0.011621166084530652]`
-- Stage Birkhoff gate-factor trace: `[0.20833335195978483, 0.5810583042265326]`
-- Stage Birkhoff offdiag-mass trace: `[0.5412599444389343, 0.516299307346344]`
+- Stage Birkhoff effective-strength trace: `[0.004166667039195697, 0.011028839591733747]`
+- Stage Birkhoff gate-factor trace: `[0.20833335195978483, 0.5514419795866874]`
+- Stage Birkhoff offdiag-mass trace: `[0.5412599444389343, 0.5440282225608826]`
 - Stage Birkhoff applied-offdiag trace: `[0.0022552499701306017, 0.006]`
-- Stage Birkhoff gap-delta trace: `[-4.6022702008485794e-05, -0.0004361644387245178]`
-- Stage Birkhoff row-error trace: `[5.960464477539063e-08, 5.960464477539063e-08]`
+- Stage Birkhoff gap-delta trace: `[-4.6022702008485794e-05, -0.0005049146711826324]`
+- Stage Birkhoff row-error trace: `[5.960464477539063e-08, 1.7881393432617188e-07]`
 - Stage Birkhoff col-error trace: `[0.0, 0.0]`
-- Stage routing stability trace: `[0.6931285858154297, 0.7952829003334045]`
+- Stage routing stability trace: `[0.6931285858154297, 0.7372403144836426]`
 - Forgetting vs routing stability correlation: `1.0`
 - Forgetting vs transport gap correlation: `0.9999999999999999`
-- Forgetting vs transport loss correlation: `-0.9999999999999998`
+- Forgetting vs transport loss correlation: `-1.0`
 - Forgetting vs mean abs excess correlation: `1.0`
 - Forgetting vs merge-count correlation: `None`
 

@@ -185,6 +185,39 @@ def _load_named_json(suite_path: Path, name: str) -> Any | None:
     return payload
 
 
+VALID_DATASET_SOURCE_KINDS = {"huggingface", "fallback_synthetic"}
+
+
+def _dataset_provenance_schema_issues(provenance: Any, prefix: str) -> list[str]:
+    missing: list[str] = []
+    if not isinstance(provenance, dict):
+        return [prefix]
+
+    for split_name in ["train", "val"]:
+        split_provenance = provenance.get(split_name)
+        split_prefix = f"{prefix}.{split_name}"
+        if not isinstance(split_provenance, dict):
+            missing.append(split_prefix)
+            continue
+
+        source_kind = split_provenance.get("source_kind")
+        if source_kind not in VALID_DATASET_SOURCE_KINDS:
+            missing.append(f"{split_prefix}.source_kind")
+
+        split = split_provenance.get("split")
+        if not isinstance(split, str) or not split:
+            missing.append(f"{split_prefix}.split")
+
+        sample_count = split_provenance.get("sample_count")
+        if not isinstance(sample_count, int) or sample_count < 0:
+            missing.append(f"{split_prefix}.sample_count")
+
+        if "max_samples" not in split_provenance:
+            missing.append(f"{split_prefix}.max_samples")
+
+    return missing
+
+
 def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
     provenance = manifest.get("provenance")
     if not isinstance(provenance, dict):
@@ -220,6 +253,13 @@ def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
         for key in ["name", "classes_per_task", "seed", "num_seeds"]:
             if dataset.get(key) is None:
                 missing.append(f"provenance.dataset.{key}")
+        benchmark_provenance = dataset.get("benchmark_provenance")
+        missing.extend(
+            _dataset_provenance_schema_issues(
+                benchmark_provenance,
+                "provenance.dataset.benchmark_provenance",
+            )
+        )
 
     output_hashes = provenance.get("output_hashes")
     if not isinstance(output_hashes, dict):
@@ -316,6 +356,69 @@ def _audit_manifest_output_hashes(
     return issues
 
 
+def _audit_benchmark_dataset_provenance(
+    suite_path: Path, manifest: dict[str, Any]
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    benchmark_path = suite_path / "continual_benchmark.json"
+    if not benchmark_path.exists():
+        return issues
+
+    benchmark = _load_named_json(suite_path, "continual_benchmark.json")
+    if not isinstance(benchmark, dict):
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": "continual_benchmark.json is missing or not a JSON object",
+            }
+        )
+        return issues
+
+    dataset = manifest.get("provenance", {}).get("dataset", {})
+    manifest_provenance = dataset.get("benchmark_provenance") if isinstance(dataset, dict) else None
+    benchmark_provenance = benchmark.get("dataset_provenance")
+    if not isinstance(benchmark_provenance, dict):
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": "continual_benchmark.json.dataset_provenance is missing",
+            }
+        )
+        return issues
+
+    benchmark_schema_issues = _dataset_provenance_schema_issues(
+        benchmark_provenance,
+        "continual_benchmark.json.dataset_provenance",
+    )
+    if benchmark_schema_issues:
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": "benchmark dataset provenance schema is invalid: "
+                + ", ".join(benchmark_schema_issues),
+            }
+        )
+    if benchmark_provenance != manifest_provenance:
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": (
+                    "continual_benchmark.json.dataset_provenance does not match "
+                    "provenance.dataset.benchmark_provenance"
+                ),
+            }
+        )
+    return issues
+
+
 def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     blocking: list[dict[str, str]] = []
     suspicious: list[dict[str, str]] = []
@@ -360,6 +463,7 @@ def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], lis
         return OUTDATED, blocking, suspicious
 
     blocking.extend(_audit_manifest_output_hashes(suite_path, manifest))
+    blocking.extend(_audit_benchmark_dataset_provenance(suite_path, manifest))
 
     ablation = _load_named_json(suite_path, "continual_ablation.json")
     operator = _load_named_json(suite_path, "continual_operator_ablation.json")
@@ -385,6 +489,8 @@ def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], lis
             }
         )
 
+    if blocking:
+        return OUTDATED, blocking, suspicious
     if suspicious:
         return MIXED, blocking, suspicious
     return CURRENT, blocking, suspicious

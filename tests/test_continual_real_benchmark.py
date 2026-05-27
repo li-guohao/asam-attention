@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import torch
+from torch.utils.data import DataLoader, Dataset
 
 repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
@@ -19,6 +20,27 @@ from experiments.run_continual_text_benchmark import (
     run_benchmark,
 )
 from experiments.train_continual_asam import ContinualTextClassifier
+
+
+class _TinyContinualTaskDataset(Dataset):
+    def __init__(self, base_dataset, task_id: int, max_length: int):
+        self.base_dataset = base_dataset
+        self.task_id = task_id
+        self.max_length = max_length
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, idx):
+        tokens = torch.full((self.max_length,), idx + self.task_id + 1, dtype=torch.long)
+        label = torch.tensor(idx % 2, dtype=torch.long)
+        task_id = torch.tensor(self.task_id, dtype=torch.long)
+        return tokens, label, task_id
+
+
+class _TinyBaseDataset:
+    def __init__(self, provenance):
+        self.dataset_provenance = provenance
 
 
 class _DummyPrototypeModel:
@@ -51,7 +73,9 @@ class _DummyPrototypeModel:
         if prototype_capacity_blend is not None:
             self.state["prototype_capacity_blend"] = float(prototype_capacity_blend)
         if prototype_masked_sinkhorn_capacity_bias is not None:
-            self.state["prototype_masked_sinkhorn_capacity_bias"] = float(prototype_masked_sinkhorn_capacity_bias)
+            self.state["prototype_masked_sinkhorn_capacity_bias"] = float(
+                prototype_masked_sinkhorn_capacity_bias
+            )
         if prototype_relocation_strength is not None:
             self.state["prototype_relocation_strength"] = float(prototype_relocation_strength)
         if prototype_merge_threshold is not None:
@@ -60,7 +84,6 @@ class _DummyPrototypeModel:
             self.state["prototype_merge_usage_threshold"] = float(prototype_merge_usage_threshold)
         if prototype_top_k is not None:
             self.state["prototype_top_k"] = int(prototype_top_k)
-
 
 
 def test_meta_secant_controller_avoids_premature_sparse_collapse():
@@ -97,7 +120,9 @@ def test_meta_secant_controller_avoids_premature_sparse_collapse():
     corr_model = _DummyPrototypeModel()
     corr_model.num_prototypes = 4
     corr_args = RealBenchmarkArgs(adaptation_strategy="correlation", transport_weight=0.05)
-    corr_record = adapt_hyperparameters_from_diagnostics(corr_model, theory, corr_args, stage_index=0)
+    corr_record = adapt_hyperparameters_from_diagnostics(
+        corr_model, theory, corr_args, stage_index=0
+    )
 
     assert corr_record["after"]["transport_weight"] == 0.05
     assert corr_record["after"]["prototype_top_k"] == 2
@@ -131,6 +156,7 @@ def test_meta_secant_controller_increases_transport_weight_under_forgetting():
     assert meta_record["after"]["transport_weight"] > 0.05
     assert meta_record["after"]["prototype_top_k"] == 1
     assert meta_args.transport_weight == meta_record["after"]["transport_weight"]
+
 
 def test_dual_transport_uses_exact_task_conditioned_transport_penalty():
     args = RealBenchmarkArgs(adaptation_strategy="dual_transport", transport_weight=0.05)
@@ -232,7 +258,6 @@ def test_theory_diagnostics_track_task_transport_statistics():
     assert "support_residual_delta" in theory["forgetting_correlations"]
 
 
-
 def test_dual_transport_controller_uses_task_level_gap_and_loss_signals():
     theory = {
         "stage_forgetting": [0.0, 0.18],
@@ -273,7 +298,11 @@ def test_dual_transport_controller_uses_task_level_gap_and_loss_signals():
     weights = record["after"]["task_transport_weights"]
     assert len(weights) == 2
     assert weights[0] > weights[1] > 0.05
-    assert record["signals"]["task_transport_signals"][0] > record["signals"]["task_transport_signals"][1] > 0.0
+    assert (
+        record["signals"]["task_transport_signals"][0]
+        > record["signals"]["task_transport_signals"][1]
+        > 0.0
+    )
     assert record["signals"]["task_gap_signals"] == [0.25, 0.02]
     assert record["signals"]["task_loss_signals"] == [0.3, 0.03]
 
@@ -355,7 +384,6 @@ def test_dual_transport_waits_for_observed_forgetting():
     assert record["signals"]["controller_topk_signal"] == 0.0
 
 
-
 def test_dual_transport_increases_regularization_under_sustained_forgetting():
     theory = {
         "stage_forgetting": [0.0, 0.20, 0.24, 0.28],
@@ -396,8 +424,41 @@ def test_dual_transport_increases_regularization_under_sustained_forgetting():
     assert record["signals"]["task_transport_signals"][-1] == 0.0
 
 
-def test_real_continual_benchmark_runs_with_split_ag_news(tmp_path):
+def test_real_continual_benchmark_runs_with_split_ag_news(tmp_path, monkeypatch):
     output_json = tmp_path / "real_benchmark.json"
+    train_provenance = {
+        "source_kind": "fallback_synthetic",
+        "split": "train",
+        "sample_count": 16,
+        "max_samples": 16,
+        "reason": "UnitTestFixture",
+    }
+    val_provenance = {
+        "source_kind": "fallback_synthetic",
+        "split": "test",
+        "sample_count": 8,
+        "max_samples": 8,
+        "reason": "UnitTestFixture",
+    }
+
+    def fake_get_continual_dataloaders(**kwargs):
+        max_length = kwargs["max_length"]
+        train_base = _TinyBaseDataset(train_provenance)
+        val_base = _TinyBaseDataset(val_provenance)
+        train_loaders = [
+            DataLoader(_TinyContinualTaskDataset(train_base, task_id, max_length), batch_size=4)
+            for task_id in range(2)
+        ]
+        val_loaders = [
+            DataLoader(_TinyContinualTaskDataset(val_base, task_id, max_length), batch_size=4)
+            for task_id in range(2)
+        ]
+        return train_loaders, val_loaders
+
+    monkeypatch.setattr(
+        "experiments.run_continual_text_benchmark.get_continual_dataloaders",
+        fake_get_continual_dataloaders,
+    )
     args = RealBenchmarkArgs(
         max_length=64,
         batch_size=4,
@@ -418,6 +479,8 @@ def test_real_continual_benchmark_runs_with_split_ag_news(tmp_path):
 
     assert output_json.exists()
     assert results["num_tasks"] == 2
+    assert results["dataset_provenance"]["train"] == train_provenance
+    assert results["dataset_provenance"]["val"] == val_provenance
     assert len(results["accuracy_matrix"]) == 2
     assert 0.0 <= results["avg_accuracy"] <= 1.0
     assert len(results["prototype_diagnostics"]) == results["num_tasks"]
@@ -460,8 +523,105 @@ def test_real_continual_benchmark_runs_with_split_ag_news(tmp_path):
     assert "Adaptation strategy" in report_text
 
 
-def test_real_continual_benchmark_runs_with_kl_topk_routing(tmp_path):
+def test_benchmark_artifacts_record_dataset_provenance(tmp_path, monkeypatch):
+    output_json = tmp_path / "real_benchmark.json"
+    train_provenance = {
+        "source_kind": "fallback_synthetic",
+        "split": "train",
+        "sample_count": 8,
+        "max_samples": 8,
+        "reason": "ImportError",
+    }
+    val_provenance = {
+        "source_kind": "huggingface",
+        "dataset_name": "ag_news",
+        "dataset_config": None,
+        "split": "test",
+        "sample_count": 4,
+        "max_samples": 4,
+    }
+
+    def fake_get_continual_dataloaders(**kwargs):
+        max_length = kwargs["max_length"]
+        train_base = _TinyBaseDataset(train_provenance)
+        val_base = _TinyBaseDataset(val_provenance)
+        train_loaders = [
+            DataLoader(_TinyContinualTaskDataset(train_base, task_id, max_length), batch_size=2)
+            for task_id in range(2)
+        ]
+        val_loaders = [
+            DataLoader(_TinyContinualTaskDataset(val_base, task_id, max_length), batch_size=2)
+            for task_id in range(2)
+        ]
+        return train_loaders, val_loaders
+
+    monkeypatch.setattr(
+        "experiments.run_continual_text_benchmark.get_continual_dataloaders",
+        fake_get_continual_dataloaders,
+    )
+    args = RealBenchmarkArgs(
+        max_length=16,
+        batch_size=2,
+        max_train_samples=8,
+        max_val_samples=4,
+        dim=16,
+        num_heads=2,
+        num_layers=1,
+        epochs_per_task=1,
+        output_json=str(output_json),
+        routing_mode="prototype",
+        num_prototypes=0,
+        prototype_slots_per_task=2,
+        prototype_top_k=2,
+        adaptive_hyperparameters=False,
+    )
+
+    results = run_benchmark(args)
+
+    assert results["dataset_provenance"]["train"] == train_provenance
+    assert results["dataset_provenance"]["val"] == val_provenance
+    persisted = json.loads(output_json.read_text(encoding="utf-8"))
+    assert persisted["dataset_provenance"] == results["dataset_provenance"]
+    report_text = Path(results["report_path"]).read_text(encoding="utf-8")
+    assert "Dataset source (train): `fallback_synthetic`" in report_text
+    assert "Dataset source (val): `huggingface`" in report_text
+
+
+def test_real_continual_benchmark_runs_with_kl_topk_routing(tmp_path, monkeypatch):
     output_json = tmp_path / "real_benchmark_kl.json"
+    train_provenance = {
+        "source_kind": "fallback_synthetic",
+        "split": "train",
+        "sample_count": 16,
+        "max_samples": 16,
+        "reason": "UnitTestFixture",
+    }
+    val_provenance = {
+        "source_kind": "fallback_synthetic",
+        "split": "test",
+        "sample_count": 8,
+        "max_samples": 8,
+        "reason": "UnitTestFixture",
+    }
+
+    def fake_get_continual_dataloaders(**kwargs):
+        max_length = kwargs["max_length"]
+        train_base = _TinyBaseDataset(train_provenance)
+        val_base = _TinyBaseDataset(val_provenance)
+        train_loaders = [
+            DataLoader(_TinyContinualTaskDataset(train_base, task_id, max_length), batch_size=4)
+            for task_id in range(2)
+        ]
+        val_loaders = [
+            DataLoader(_TinyContinualTaskDataset(val_base, task_id, max_length), batch_size=4)
+            for task_id in range(2)
+        ]
+        return train_loaders, val_loaders
+
+    monkeypatch.setattr(
+        "experiments.run_continual_text_benchmark.get_continual_dataloaders",
+        fake_get_continual_dataloaders,
+    )
     args = RealBenchmarkArgs(
         max_length=64,
         batch_size=4,
@@ -482,8 +642,9 @@ def test_real_continual_benchmark_runs_with_kl_topk_routing(tmp_path):
     assert output_json.exists()
     assert results["config"]["prototype_routing_strategy"] == "kl_topk"
     assert results["num_tasks"] == 2
+    assert results["dataset_provenance"]["train"] == train_provenance
+    assert results["dataset_provenance"]["val"] == val_provenance
     assert len(results["prototype_diagnostics"]) == results["num_tasks"]
     assert 0.0 <= results["avg_accuracy"] <= 1.0
     assert Path(results["plot_path"]).exists()
     assert Path(results["report_path"]).exists()
-

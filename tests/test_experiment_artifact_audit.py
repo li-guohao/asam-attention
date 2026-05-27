@@ -46,6 +46,20 @@ def _current_manifest():
                 "max_val_samples": 32,
                 "seed": 42,
                 "num_seeds": 2,
+                "benchmark_provenance": {
+                    "train": {
+                        "source_kind": "fallback_synthetic",
+                        "split": "train",
+                        "sample_count": 64,
+                        "max_samples": 64,
+                    },
+                    "val": {
+                        "source_kind": "fallback_synthetic",
+                        "split": "test",
+                        "sample_count": 32,
+                        "max_samples": 32,
+                    },
+                },
             },
             "output_hashes": {
                 "continual_benchmark.json": "a" * 64,
@@ -59,8 +73,16 @@ def _current_manifest():
     }
 
 
+def _current_benchmark_payload():
+    return {
+        "accuracy_matrix": [[0.5]],
+        "avg_accuracy": 0.5,
+        "dataset_provenance": _current_manifest()["provenance"]["dataset"]["benchmark_provenance"],
+    }
+
+
 def _write_current_suite(suite):
-    benchmark = {"accuracy_matrix": [[0.5]], "avg_accuracy": 0.5}
+    benchmark = _current_benchmark_payload()
     ablation = {"strategies": [{"strategy": "dual_transport"}]}
     operator = {"strategies": [{"name": "masked_sinkhorn_topk"}]}
     _write_json(suite / "continual_benchmark.json", benchmark)
@@ -216,6 +238,95 @@ def test_manifest_with_unknown_git_commit_is_outdated(tmp_path):
     assert any("provenance.git.commit" in issue["message"] for issue in summary["blocking_issues"])
 
 
+def test_manifest_without_dataset_source_metadata_is_outdated(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_missing_dataset_source"
+    manifest = _current_manifest()
+    manifest["provenance"]["dataset"].pop("benchmark_provenance")
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+    _write_json(suite / "continual_ablation.json", {"strategies": [{"strategy": "dual_transport"}]})
+    _write_json(
+        suite / "continual_operator_ablation.json",
+        {"strategies": [{"name": "masked_sinkhorn_topk"}]},
+    )
+
+    summary = audit_paths([suite])
+
+    assert summary["suites"][0]["schema_provenance_rating"] == "OUTDATED"
+    assert any(
+        "provenance.dataset.benchmark_provenance" in issue["message"]
+        for issue in summary["blocking_issues"]
+    )
+
+
+def test_benchmark_json_without_dataset_source_metadata_is_outdated(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_missing_benchmark_dataset_source"
+    _write_current_suite(suite)
+    _write_json(suite / "continual_benchmark.json", {"accuracy_matrix": [[0.5]]})
+    manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))
+    manifest["provenance"]["output_hashes"]["continual_benchmark.json"] = _file_sha256(
+        suite / "continual_benchmark.json"
+    )
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+
+    summary = audit_paths([suite])
+
+    assert summary["suites"][0]["schema_provenance_rating"] == "OUTDATED"
+    messages = [issue["message"] for issue in summary["blocking_issues"]]
+    assert messages.count("continual_benchmark.json.dataset_provenance is missing") == 1
+
+
+def test_benchmark_json_dataset_source_must_match_manifest(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_mismatched_benchmark_dataset_source"
+    _write_current_suite(suite)
+    benchmark = _current_benchmark_payload()
+    benchmark["dataset_provenance"]["train"]["source_kind"] = "huggingface"
+    _write_json(suite / "continual_benchmark.json", benchmark)
+    manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))
+    manifest["provenance"]["output_hashes"]["continual_benchmark.json"] = _file_sha256(
+        suite / "continual_benchmark.json"
+    )
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+
+    summary = audit_paths([suite])
+
+    assert summary["suites"][0]["schema_provenance_rating"] == "OUTDATED"
+    assert any(
+        "does not match provenance.dataset.benchmark_provenance" in issue["message"]
+        for issue in summary["blocking_issues"]
+    )
+
+
+def test_dataset_source_metadata_requires_strict_split_schema(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_bad_dataset_source_schema"
+    _write_current_suite(suite)
+    manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))
+    benchmark = _current_benchmark_payload()
+    for payload in (
+        manifest["provenance"]["dataset"]["benchmark_provenance"],
+        benchmark["dataset_provenance"],
+    ):
+        payload["train"].pop("split")
+        payload["val"]["source_kind"] = "unknown_source"
+
+    _write_json(suite / "continual_benchmark.json", benchmark)
+    manifest["provenance"]["output_hashes"]["continual_benchmark.json"] = _file_sha256(
+        suite / "continual_benchmark.json"
+    )
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+
+    summary = audit_paths([suite])
+
+    assert summary["suites"][0]["schema_provenance_rating"] == "OUTDATED"
+    assert any(
+        "provenance.dataset.benchmark_provenance.train.split" in issue["message"]
+        for issue in summary["blocking_issues"]
+    )
+    assert any(
+        "provenance.dataset.benchmark_provenance.val.source_kind" in issue["message"]
+        for issue in summary["blocking_issues"]
+    )
+
+
 def test_manifest_hash_mismatch_is_blocking(tmp_path):
     suite = tmp_path / "experiments" / "paper_suite_hash_mismatch"
     _write_current_suite(suite)
@@ -282,7 +393,9 @@ def test_manifest_hash_key_must_stay_within_suite(tmp_path):
 def test_text_artifact_hashes_are_line_ending_stable(tmp_path):
     suite = tmp_path / "experiments" / "paper_suite_line_endings"
     _write_current_suite(suite)
-    crlf_payload = b'{"accuracy_matrix":[[0.5]],"avg_accuracy":0.5}\r\n'
+    crlf_payload = (
+        json.dumps(_current_benchmark_payload(), separators=(",", ":")).encode("utf-8") + b"\r\n"
+    )
     lf_payload = crlf_payload.replace(b"\r\n", b"\n")
     (suite / "continual_benchmark.json").write_bytes(crlf_payload)
     manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))

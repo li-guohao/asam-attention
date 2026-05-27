@@ -10,15 +10,43 @@ Supports:
 - Custom long-document datasets
 """
 
-import torch
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
-from typing import List, Tuple, Optional, Dict
-import os
-import json
-import random
 import hashlib
+import json
+import os
+import random
 import re
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Dataset
+
+
+def _build_dataset_provenance(
+    source_kind: str,
+    split: Optional[str],
+    sample_count: int,
+    max_samples: Optional[int],
+    dataset_name: Optional[str] = None,
+    dataset_config: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> Dict:
+    provenance = {
+        "source_kind": source_kind,
+        "split": split,
+        "sample_count": int(sample_count),
+        "max_samples": max_samples,
+    }
+    if dataset_name is not None:
+        provenance["dataset_name"] = dataset_name
+        provenance["dataset_config"] = dataset_config
+    if reason is not None:
+        provenance["reason"] = reason
+    return provenance
+
+
+def _sanitize_dataset_error(exc: BaseException) -> str:
+    return type(exc).__name__
 
 
 class LongTextDataset(Dataset):
@@ -31,12 +59,14 @@ class LongTextDataset(Dataset):
         tokenizer,
         max_length: int = 4096,
         stride: Optional[int] = None,
+        dataset_provenance: Optional[Dict] = None,
     ):
         self.texts = texts
         self.labels = labels
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.stride = stride or max_length // 2
+        self.dataset_provenance = dict(dataset_provenance or {})
 
     def __len__(self):
         return len(self.texts)
@@ -57,9 +87,7 @@ class LongTextDataset(Dataset):
             # Pad
             tokens = tokens + [0] * (self.max_length - len(tokens))
 
-        return torch.tensor(tokens, dtype=torch.long), torch.tensor(
-            label, dtype=torch.long
-        )
+        return torch.tensor(tokens, dtype=torch.long), torch.tensor(label, dtype=torch.long)
 
 
 class IMDBLongDataset(LongTextDataset):
@@ -109,7 +137,14 @@ class AGNewsDataset(LongTextDataset):
     }
 
     @classmethod
-    def _dummy_dataset(cls, max_length: int, tokenizer=None, max_samples: Optional[int] = None):
+    def _dummy_dataset(
+        cls,
+        max_length: int,
+        tokenizer=None,
+        max_samples: Optional[int] = None,
+        split: Optional[str] = None,
+        reason: Optional[str] = None,
+    ):
         sample_count = max_samples or 256
         texts = []
         labels = []
@@ -125,7 +160,19 @@ class AGNewsDataset(LongTextDataset):
         if tokenizer is None:
             tokenizer = SimpleCharTokenizer()
 
-        return cls(texts, labels, tokenizer, max_length)
+        return cls(
+            texts,
+            labels,
+            tokenizer,
+            max_length,
+            dataset_provenance=_build_dataset_provenance(
+                source_kind="fallback_synthetic",
+                split=split,
+                sample_count=len(texts),
+                max_samples=max_samples,
+                reason=reason,
+            ),
+        )
 
     @classmethod
     def load(
@@ -140,9 +187,15 @@ class AGNewsDataset(LongTextDataset):
 
         try:
             from datasets import load_dataset
-        except ImportError:
+        except ImportError as exc:
             print("datasets not installed, using fallback AG News samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+            return cls._dummy_dataset(
+                max_length,
+                tokenizer,
+                max_samples=max_samples,
+                split=split,
+                reason=_sanitize_dataset_error(exc),
+            )
 
         try:
             hf_token = (
@@ -156,7 +209,9 @@ class AGNewsDataset(LongTextDataset):
                 labels = []
                 for item in ds:
                     if "title" in item and "description" in item:
-                        article_text = f"Headline: {item['title']}\n\nArticle: {item['description']}"
+                        article_text = (
+                            f"Headline: {item['title']}\n\nArticle: {item['description']}"
+                        )
                     elif "text" in item:
                         article_text = str(item["text"])
                     else:
@@ -172,7 +227,9 @@ class AGNewsDataset(LongTextDataset):
                     if label not in label_buckets or len(label_buckets[label]) >= target_per_label:
                         continue
                     if "title" in item and "description" in item:
-                        article_text = f"Headline: {item['title']}\n\nArticle: {item['description']}"
+                        article_text = (
+                            f"Headline: {item['title']}\n\nArticle: {item['description']}"
+                        )
                     elif "text" in item:
                         article_text = str(item["text"])
                     else:
@@ -191,11 +248,31 @@ class AGNewsDataset(LongTextDataset):
                             break
                     if len(texts) >= max_samples:
                         break
-            return cls(texts, labels, tokenizer, max_length)
+            return cls(
+                texts,
+                labels,
+                tokenizer,
+                max_length,
+                dataset_provenance=_build_dataset_provenance(
+                    source_kind="huggingface",
+                    dataset_name="ag_news",
+                    dataset_config=None,
+                    split=split,
+                    sample_count=len(texts),
+                    max_samples=max_samples,
+                ),
+            )
         except Exception as exc:
-            print(f"Error loading AG News ({type(exc).__name__}: {exc}); using fallback samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
-
+            print(
+                f"Error loading AG News ({_sanitize_dataset_error(exc)}); using fallback samples..."
+            )
+            return cls._dummy_dataset(
+                max_length,
+                tokenizer,
+                max_samples=max_samples,
+                split=split,
+                reason=_sanitize_dataset_error(exc),
+            )
 
 
 class DBPediaDataset(LongTextDataset):
@@ -256,7 +333,10 @@ class DBPediaDataset(LongTextDataset):
     def _build_text(cls, item: Dict) -> str:
         title = cls._clean_text(item.get("title") or item.get("name"))
         content = cls._clean_text(
-            item.get("content") or item.get("text") or item.get("article") or item.get("description")
+            item.get("content")
+            or item.get("text")
+            or item.get("article")
+            or item.get("description")
         )
         sections = []
         if title:
@@ -271,6 +351,8 @@ class DBPediaDataset(LongTextDataset):
         max_length: int,
         tokenizer=None,
         max_samples: Optional[int] = None,
+        split: Optional[str] = None,
+        reason: Optional[str] = None,
     ):
         sample_count = max_samples or 280
         texts = []
@@ -295,7 +377,19 @@ class DBPediaDataset(LongTextDataset):
         if tokenizer is None:
             tokenizer = SimpleCharTokenizer()
 
-        return cls(texts, labels, tokenizer, max_length)
+        return cls(
+            texts,
+            labels,
+            tokenizer,
+            max_length,
+            dataset_provenance=_build_dataset_provenance(
+                source_kind="fallback_synthetic",
+                split=split,
+                sample_count=len(texts),
+                max_samples=max_samples,
+                reason=reason,
+            ),
+        )
 
     @classmethod
     def load(
@@ -310,9 +404,15 @@ class DBPediaDataset(LongTextDataset):
 
         try:
             from datasets import load_dataset
-        except ImportError:
+        except ImportError as exc:
             print("datasets not installed, using fallback DBPedia samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+            return cls._dummy_dataset(
+                max_length,
+                tokenizer,
+                max_samples=max_samples,
+                split=split,
+                reason=_sanitize_dataset_error(exc),
+            )
 
         try:
             hf_token = (
@@ -358,15 +458,43 @@ class DBPediaDataset(LongTextDataset):
                             break
                     if len(texts) >= max_samples:
                         break
-            return cls(texts, labels, tokenizer, max_length)
+            return cls(
+                texts,
+                labels,
+                tokenizer,
+                max_length,
+                dataset_provenance=_build_dataset_provenance(
+                    source_kind="huggingface",
+                    dataset_name="dbpedia_14",
+                    dataset_config=None,
+                    split=split,
+                    sample_count=len(texts),
+                    max_samples=max_samples,
+                ),
+            )
         except Exception as exc:
-            print(f"Error loading DBPedia ({type(exc).__name__}: {exc}); using fallback samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+            print(
+                f"Error loading DBPedia ({_sanitize_dataset_error(exc)}); using fallback samples..."
+            )
+            return cls._dummy_dataset(
+                max_length,
+                tokenizer,
+                max_samples=max_samples,
+                split=split,
+                reason=_sanitize_dataset_error(exc),
+            )
+
 
 class ContinualSubsetDataset(Dataset):
     """Subset wrapper that remaps labels for class-incremental tasks."""
 
-    def __init__(self, base_dataset: LongTextDataset, indices: List[int], label_map: Dict[int, int], task_id: int):
+    def __init__(
+        self,
+        base_dataset: LongTextDataset,
+        indices: List[int],
+        label_map: Dict[int, int],
+        task_id: int,
+    ):
         self.base_dataset = base_dataset
         self.indices = indices
         self.label_map = label_map
@@ -378,7 +506,11 @@ class ContinualSubsetDataset(Dataset):
     def __getitem__(self, idx: int):
         tokens, label = self.base_dataset[self.indices[idx]]
         remapped_label = self.label_map[int(label.item())]
-        return tokens, torch.tensor(remapped_label, dtype=torch.long), torch.tensor(self.task_id, dtype=torch.long)
+        return (
+            tokens,
+            torch.tensor(remapped_label, dtype=torch.long),
+            torch.tensor(self.task_id, dtype=torch.long),
+        )
 
 
 def build_split_classification_tasks(
@@ -444,11 +576,23 @@ def get_continual_dataloaders(
     val_tasks = build_split_classification_tasks(val_dataset, classes_per_task=classes_per_task)
 
     train_loaders = [
-        DataLoader(task_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+        DataLoader(
+            task_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
         for task_dataset in train_tasks
     ]
     val_loaders = [
-        DataLoader(task_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+        DataLoader(
+            task_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
         for task_dataset in val_tasks
     ]
     return train_loaders, val_loaders
@@ -560,9 +704,7 @@ class ArXivDataset(LongTextDataset):
         if section_names:
             sections.append(f"Sections: {section_names}")
 
-        article = cls._clean_text(
-            item.get("article") or item.get("text") or item.get("paper")
-        )
+        article = cls._clean_text(item.get("article") or item.get("text") or item.get("paper"))
         if article:
             sections.append(f"Article: {article}")
 
@@ -624,6 +766,8 @@ class ArXivDataset(LongTextDataset):
         max_length: int,
         tokenizer=None,
         max_samples: Optional[int] = None,
+        split: Optional[str] = None,
+        reason: Optional[str] = None,
     ):
         sample_count = max_samples or 256
         texts = []
@@ -647,7 +791,19 @@ class ArXivDataset(LongTextDataset):
         if tokenizer is None:
             tokenizer = SimpleCharTokenizer()
 
-        return cls(texts, labels, tokenizer, max_length)
+        return cls(
+            texts,
+            labels,
+            tokenizer,
+            max_length,
+            dataset_provenance=_build_dataset_provenance(
+                source_kind="fallback_synthetic",
+                split=split,
+                sample_count=len(texts),
+                max_samples=max_samples,
+                reason=reason,
+            ),
+        )
 
     @classmethod
     def load(
@@ -670,9 +826,15 @@ class ArXivDataset(LongTextDataset):
 
         try:
             from datasets import load_dataset
-        except ImportError:
+        except ImportError as exc:
             print("datasets not installed, using fallback ArXiv samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+            return cls._dummy_dataset(
+                max_length,
+                tokenizer,
+                max_samples=max_samples,
+                split=split,
+                reason=_sanitize_dataset_error(exc),
+            )
 
         dataset_candidates = [
             ("scientific_papers", "arxiv"),
@@ -702,16 +864,35 @@ class ArXivDataset(LongTextDataset):
                         break
 
                 if texts:
-                    return cls(texts, labels, tokenizer, max_length)
+                    return cls(
+                        texts,
+                        labels,
+                        tokenizer,
+                        max_length,
+                        dataset_provenance=_build_dataset_provenance(
+                            source_kind="huggingface",
+                            dataset_name=dataset_name,
+                            dataset_config=dataset_config,
+                            split=split,
+                            sample_count=len(texts),
+                            max_samples=max_samples,
+                        ),
+                    )
 
                 load_errors.append(f"{dataset_name}: no valid samples after filtering")
             except Exception as exc:
-                load_errors.append(f"{dataset_name}: {exc}")
+                load_errors.append(f"{dataset_name}: {_sanitize_dataset_error(exc)}")
 
         print("Error loading ArXiv datasets; using fallback samples...")
         for error in load_errors:
             print(f"  - {error}")
-        return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+        return cls._dummy_dataset(
+            max_length,
+            tokenizer,
+            max_samples=max_samples,
+            split=split,
+            reason="LoadError",
+        )
 
 
 class SyntheticLongRangeDataset(Dataset):
@@ -784,9 +965,7 @@ class ListOpsDataset(Dataset):
         else:
             tokens = tokens + [0] * (self.max_length - len(tokens))
 
-        return torch.tensor(tokens, dtype=torch.long), torch.tensor(
-            result, dtype=torch.long
-        )
+        return torch.tensor(tokens, dtype=torch.long), torch.tensor(result, dtype=torch.long)
 
     def _generate_expression(self, depth: int = 0) -> Tuple[str, int]:
         """Generate random nested expression."""
@@ -801,9 +980,7 @@ class ListOpsDataset(Dataset):
             left, left_val = self._generate_expression(depth + 1)
             right, right_val = self._generate_expression(depth + 1)
             expr = f"[{op} {left} {right}]"
-            result = (
-                max(left_val, right_val) if op == "MAX" else min(left_val, right_val)
-            )
+            result = max(left_val, right_val) if op == "MAX" else min(left_val, right_val)
         elif op == "MED":
             nums = [self._generate_expression(depth + 1)[1] for _ in range(3)]
             expr = f"[{op} {' '.join(str(n) for n in nums)}]"

@@ -35,6 +35,7 @@ python scripts/run_continual_paper_suite.py `
 python scripts/audit_experiment_artifacts.py experiments/paper_suite_canonical_smoke
 ```
 
-The suite audited as `CURRENT` with zero blocking issues. The audit reports one
-non-blocking semantic-duplicate warning because some smoke variants intentionally
-share equivalent tiny-run outputs under the constrained one-seed setting.
+The suite audited as `CURRENT` with zero blocking issues. The audit reports
+non-blocking semantic-duplicate warnings because some smoke variants
+intentionally share equivalent tiny-run outputs under the constrained one-seed
+setting.
