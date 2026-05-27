@@ -23,6 +23,10 @@ def test_pipeline_report_mentions_key_artifacts():
         "avg_accuracy": 0.71,
         "avg_forgetting": 0.08,
         "backward_transfer": 0.03,
+        "dataset_provenance": {
+            "train": {"source_kind": "fallback_synthetic"},
+            "val": {"source_kind": "huggingface"},
+        },
     }
     ablation_results = {
         "best_avg_accuracy": {"strategy": "meta_secant", "value": 0.74},
@@ -72,6 +76,8 @@ def test_pipeline_report_mentions_key_artifacts():
     assert "Candidate profile" in report
     assert "Prototype layout" in report
     assert "Transport weight" in report
+    assert "Dataset source (train): `fallback_synthetic`" in report
+    assert "Dataset source (val): `huggingface`" in report
     assert "Profile note" in report
     assert "## Paper Sync" in report
     assert "Synced paper TeX" in report
@@ -144,6 +150,22 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
             "avg_accuracy": 0.55,
             "avg_forgetting": -0.04,
             "backward_transfer": 0.02,
+            "dataset_provenance": {
+                "train": {
+                    "source_kind": "fallback_synthetic",
+                    "split": "train",
+                    "sample_count": 64,
+                    "max_samples": 64,
+                    "reason": "ImportError",
+                },
+                "val": {
+                    "source_kind": "fallback_synthetic",
+                    "split": "test",
+                    "sample_count": 32,
+                    "max_samples": 32,
+                    "reason": "ImportError",
+                },
+            },
             "plot_path": _write(output_dir / "continual_benchmark.png", "plot"),
             "report_path": _write(output_dir / "continual_benchmark_report.md", "report"),
         }
@@ -230,6 +252,22 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
         "max_val_samples": 32,
         "num_seeds": 2,
         "seed": 42,
+        "benchmark_provenance": {
+            "train": {
+                "source_kind": "fallback_synthetic",
+                "split": "train",
+                "sample_count": 64,
+                "max_samples": 64,
+                "reason": "ImportError",
+            },
+            "val": {
+                "source_kind": "fallback_synthetic",
+                "split": "test",
+                "sample_count": 32,
+                "max_samples": 32,
+                "reason": "ImportError",
+            },
+        },
     }
     assert provenance["output_hashes"]["continual_benchmark.json"]
     assert provenance["output_hashes"]["continual_ablation.json"]
@@ -240,6 +278,7 @@ def test_run_pipeline_uses_resolved_candidate_profile(tmp_path, monkeypatch):
     assert "Candidate profile: `retention_no_transport`" in report_text
     assert "Prototype layout: `num_prototypes=0, slots_per_task=2, top_k=1`" in report_text
     assert "Transport weight: `0.0`" in report_text
+    assert "Dataset source (train): `fallback_synthetic`" in report_text
 
 
 def test_run_pipeline_syncs_appendix_outputs(tmp_path, monkeypatch):

@@ -1,6 +1,6 @@
 {
   "config": {
-    "output_dir": "experiments/paper_suite_canonical_smoke",
+    "output_dir": "experiments\\paper_suite_canonical_smoke",
     "dataset_name": "split_ag_news",
     "classes_per_task": 2,
     "max_length": 64,
@@ -41,7 +41,7 @@
     "appendix_only_tex": null
   },
   "resolved_config": {
-    "output_dir": "experiments/paper_suite_canonical_smoke",
+    "output_dir": "experiments\\paper_suite_canonical_smoke",
     "dataset_name": "split_ag_news",
     "classes_per_task": 2,
     "max_length": 64,
@@ -99,9 +99,9 @@
   "operator_ablation_report": "experiments\\paper_suite_canonical_smoke\\continual_operator_ablation_report.md",
   "provenance": {
     "argv": [
-      "scripts/run_continual_paper_suite.py",
+      "scripts\\run_continual_paper_suite.py",
       "--output-dir",
-      "experiments/paper_suite_canonical_smoke",
+      "experiments\\paper_suite_canonical_smoke",
       "--candidate-profile",
       "retention_no_transport",
       "--num-seeds",
@@ -124,10 +124,10 @@
     "python_version": "3.13.11",
     "torch_version": "2.11.0+cu126",
     "platform": "Windows-11-10.0.22000-SP0",
-    "started_at_utc": "2026-05-26T15:47:49.785076Z",
-    "finished_at_utc": "2026-05-26T15:49:36.025440Z",
+    "started_at_utc": "2026-05-27T01:38:59.777337Z",
+    "finished_at_utc": "2026-05-27T01:40:37.763784Z",
     "git": {
-      "commit": "6de5f6f73f4d5dfd563dc63a6208c60bfdacdad1",
+      "commit": "aae9ba4ca2fae84b9df397862195e51c03166857",
       "dirty": false,
       "status_porcelain": ""
     },
@@ -137,34 +137,53 @@
       "max_train_samples": 16,
       "max_val_samples": 8,
       "seed": 42,
-      "num_seeds": 1
+      "num_seeds": 1,
+      "benchmark_provenance": {
+        "train": {
+          "source_kind": "huggingface",
+          "split": "train",
+          "sample_count": 16,
+          "max_samples": 16,
+          "dataset_name": "ag_news",
+          "dataset_config": null
+        },
+        "val": {
+          "source_kind": "huggingface",
+          "split": "test",
+          "sample_count": 8,
+          "max_samples": 8,
+          "dataset_name": "ag_news",
+          "dataset_config": null
+        }
+      }
     },
     "device": "cpu",
     "output_hashes": {
-      "continual_ablation.csv": "8ddef9d45abd7669d21777c1c34f6120db8c07ec37c5dd1bc1d0ec08506c2e84",
-      "continual_ablation.json": "6349c27b6c16a6fa96cf3a4a708312ea43ade0b015a8dbae8ce3e1233f7e157b",
-      "continual_ablation.png": "7287511e012ab2e52d230b18d25c3f3e440e147ac7f7dd1dc39d0468834e2962",
-      "continual_ablation_correlation_seed42.json": "50789b5dd5bdaa608b306eb4caba72dbd2579dc0af0144bacbc109bc52282847",
-      "continual_ablation_dual_transport_seed42.json": "860fd140199417838054fddc0643701cc076ff19b62cae3e0859d09332437b4d",
-      "continual_ablation_meta_secant_seed42.json": "05f43dffc9f83c3b5ce05f4b3331376156ef0f589194cbb74a735733c3bee5bf",
-      "continual_ablation_no_adaptation_seed42.json": "af0ab10a575a33f0534dd5bcda26a6f4283a6cd4e374f4279caa2d15b509b1cf",
-      "continual_ablation_report.md": "41d03a8d891166293f2bb831d343dd69c2a5d570c9a29d44d2c17cdd74a6774c",
+      "continual_benchmark.json": "aa20f372ff5ecb03a96225fba2543a36707c805a7ba1e4e4335808be15742904",
+      "continual_benchmark_plots.png": "a232f7d3f67de8921172bf9b2e26d6023e0582895eb38a7b1d624d45c267bee3",
+      "continual_benchmark_report.md": "d46000aaad8b0d76a063c4e5a3976d78d897b6af4f35266909925daad2cbcdf6",
+      "continual_ablation.json": "e7b4147b37480e2702cff2f5262d06d1ca39f0c969853fd62aa7cc4cc31d62ce",
       "continual_ablation_table.md": "b0b35741f175c9da721b8fb210503195d08fe9668327559ce50e14a454df7375",
-      "continual_ablation_task_routing_seed42.json": "68377d0f4758609210e66d60d8d8cfc13c254662b138c5531cd4b84e61072726",
-      "continual_benchmark.json": "531c2dde5b6e3a62f18ad926338d49ba4596caa2099836d8df623a389c84f8fe",
-      "continual_benchmark_plots.png": "befb75441c4f51d5cdd27e53dbc38d8a9eb2cc1732088bff283f5a50b2f8e0cd",
-      "continual_benchmark_report.md": "fb0fd69923148cbe5ffda021983d6099ef2b4aaa6a11e1e42a49f340e7c8fdc6",
-      "continual_operator_ablation.csv": "41d3cccbc26046d559bb3ce7b346c982ed35c87178df48d5852a994210436523",
-      "continual_operator_ablation.json": "b6d3acae587136c0fc0e96af193e55b19b6e776fdeedb964ab6dc821be5850d4",
-      "continual_operator_ablation.png": "7250e6ad903d6811a5b7c7d164fc3d975edbe839e78ea4b7d4347f6fc646a820",
-      "continual_operator_ablation_kl_topk_seed42.json": "8d341c289390bbac066793cf0d6717e60ce4ab676d3c3261319f64cf480663da",
-      "continual_operator_ablation_masked_sinkhorn_topk_seed42.json": "5e49758ed7551192b6f3b6100a3704c1a01cb1b0bf3cb2fe96dc26bdce6e5bbb",
-      "continual_operator_ablation_no_merge_seed42.json": "691b98a069b2d9ae91c8b2e226c7d13638e681f580c407ffb5b17c1ac0636880",
-      "continual_operator_ablation_no_relocation_seed42.json": "b6fffa456195fef376f00be4e5e51d7aae4890f64fae364339e1384e326ef25a",
-      "continual_operator_ablation_no_transport_seed42.json": "f672edce77f6f8fb4f26bf92a5ca5beabfee3aac61810b4a2dfb3adce7cb28a1",
-      "continual_operator_ablation_report.md": "268d571ac6e1733a362b4d913c9a3ab22ff64c0369d1cbb3ad4f7b059bf98fd2",
-      "continual_operator_ablation_sinkhorn_topk_seed42.json": "b1194973999b93000ce2153193536488008e9e605282dd1ca8aeac564f7281df",
-      "continual_operator_ablation_table.md": "d2994dba5ff6b7311de4b02a34cdb6b4d5e7b8cb6993a340b4de50cc49549bd4"
+      "continual_ablation.csv": "e7c42cd6fb4ffd962a12bdf1ed4a9e6d23d20af6b71a4a5739b0a8e688698443",
+      "continual_ablation.png": "7287511e012ab2e52d230b18d25c3f3e440e147ac7f7dd1dc39d0468834e2962",
+      "continual_ablation_report.md": "41d03a8d891166293f2bb831d343dd69c2a5d570c9a29d44d2c17cdd74a6774c",
+      "continual_operator_ablation.json": "47eb205fd98ab651f1135f73b6a5da5ad27773fed6dff60049d428088b20ab24",
+      "continual_operator_ablation_table.md": "f9b56351bc9a0fb7c29f0f9fbfdb9abd709ec957643c6fa8f88ab466fed42732",
+      "continual_operator_ablation.csv": "30198f887e9e0c665b08736c6ed73946556b641da0a4c96fd8ba2e34b6a8b13c",
+      "continual_operator_ablation.png": "b2d382f8419f169305c088198b4b3d1189c965d2eb3c7dcaee931f70f58868cd",
+      "continual_operator_ablation_report.md": "058e913ea943c0b953b879cd2d5e4b895b28b2d11c37341e2293b3ac87dd7b12",
+      "continual_ablation_correlation_seed42.json": "14e3996abbef3cf79b906ea0aeb8fbe776161e2f9d95cf2ded012ded53654a34",
+      "continual_ablation_dual_transport_seed42.json": "30ae9f6b541d60bec024da717689bd10044c023aa180918fc5fea3de2a346367",
+      "continual_ablation_meta_secant_seed42.json": "ff253128fb443191f262a0e1a01f8a1bfc15dc5a33829d298d748f5453a28205",
+      "continual_ablation_no_adaptation_seed42.json": "dbdf4cfe2f267fc3448246b7ea8f73d81d8170284a0b2207ed0c58ae842baa62",
+      "continual_ablation_task_routing_seed42.json": "ee8b851815489f4b608c0b89a4bd916991bc3979155b7f83680fba649ba230a3",
+      "continual_operator_ablation_kl_topk_seed42.json": "1047679efada90e8b0e73f24020262c3ed57b2ab31e1ed2233a425f6756621da",
+      "continual_operator_ablation_masked_sinkhorn_topk_seed42.json": "1c638dbbf5caf742229a60bf6e9fd2b333eabf7e7cfd4131e443eb783ab4b396",
+      "continual_operator_ablation_no_merge_seed42.json": "30de47871516b184fb54fda7630963b32ff7dea573f0254c454a95cdf25d15f0",
+      "continual_operator_ablation_no_relocation_seed42.json": "3f9fb44c61ebf0708f6f05000277949a492c058d641f1dd099b161b05c15bc16",
+      "continual_operator_ablation_no_transport_seed42.json": "585aae3dbda7674dcfd1127032b28699142f1ca577b78e6acde1b40080bf9096",
+      "continual_operator_ablation_sinkhorn_support_masked_seed42.json": "ba562d14a577c6166a2094a0be5f65ba38a68321fcf2fc13070c1c28d5040763",
+      "continual_operator_ablation_sinkhorn_topk_seed42.json": "058a9e074d48e169bc9997b0c20998f9822a234dca109551dbb1d4c8bf148f88"
     }
   }
 }

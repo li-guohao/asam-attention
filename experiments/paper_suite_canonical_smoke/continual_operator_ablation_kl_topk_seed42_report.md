@@ -1,6 +1,8 @@
 # Continual Text Benchmark Report
 
 - Dataset: `split_ag_news`
+- Dataset source (train): `huggingface`
+- Dataset source (val): `huggingface`
 - Routing mode: `prototype`
 - Routing strategy: `kl_topk`
 - Tasks: `2`

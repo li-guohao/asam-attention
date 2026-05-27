@@ -64,6 +64,24 @@
     "seed": 42,
     "output_json": "experiments\\paper_suite_canonical_smoke\\continual_ablation_task_routing_seed42.json"
   },
+  "dataset_provenance": {
+    "train": {
+      "source_kind": "huggingface",
+      "split": "train",
+      "sample_count": 16,
+      "max_samples": 16,
+      "dataset_name": "ag_news",
+      "dataset_config": null
+    },
+    "val": {
+      "source_kind": "huggingface",
+      "split": "test",
+      "sample_count": 8,
+      "max_samples": 8,
+      "dataset_name": "ag_news",
+      "dataset_config": null
+    }
+  },
   "resolved_prototype_layout": {
     "num_prototypes": 4,
     "prototype_top_k": 1,

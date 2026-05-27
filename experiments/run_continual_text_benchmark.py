@@ -136,7 +136,9 @@ def initialize_task_transport_weights(args: RealBenchmarkArgs, num_tasks: int):
     args.task_transport_weights = [base_weight for _ in range(num_tasks)]
 
 
-def get_task_transport_weights(args: RealBenchmarkArgs, num_tasks: Optional[int] = None) -> List[float]:
+def get_task_transport_weights(
+    args: RealBenchmarkArgs, num_tasks: Optional[int] = None
+) -> List[float]:
     task_weights = list(getattr(args, "task_transport_weights", []))
     if num_tasks is None:
         return task_weights
@@ -145,12 +147,16 @@ def get_task_transport_weights(args: RealBenchmarkArgs, num_tasks: Optional[int]
     return task_weights[:num_tasks]
 
 
-def compute_effective_transport_weight(args: RealBenchmarkArgs, task_ids: Optional[torch.Tensor] = None) -> float:
+def compute_effective_transport_weight(
+    args: RealBenchmarkArgs, task_ids: Optional[torch.Tensor] = None
+) -> float:
     task_weights = getattr(args, "task_transport_weights", None)
     if not task_weights or task_ids is None or args.adaptation_strategy != "dual_transport":
         return float(args.transport_weight)
     task_weight_tensor = torch.tensor(task_weights, dtype=torch.float32, device=task_ids.device)
-    sampled_weights = task_weight_tensor[task_ids.long().clamp(min=0, max=task_weight_tensor.numel() - 1)]
+    sampled_weights = task_weight_tensor[
+        task_ids.long().clamp(min=0, max=task_weight_tensor.numel() - 1)
+    ]
     return float(sampled_weights.mean().item())
 
 
@@ -201,27 +207,54 @@ def evaluate_task(model: ContinualTextClassifier, data_loader, device: torch.dev
     return total_correct / max(1, total_samples)
 
 
+def _base_dataset_from_loader(data_loader):
+    dataset = getattr(data_loader, "dataset", None)
+    seen = set()
+    while dataset is not None and id(dataset) not in seen:
+        seen.add(id(dataset))
+        if hasattr(dataset, "dataset_provenance"):
+            return dataset
+        dataset = getattr(dataset, "base_dataset", None)
+    return None
+
+
+def extract_dataset_provenance(data_loaders) -> Dict[str, object]:
+    for data_loader in data_loaders:
+        base_dataset = _base_dataset_from_loader(data_loader)
+        if base_dataset is not None:
+            return dict(getattr(base_dataset, "dataset_provenance", {}) or {})
+    return {}
+
+
 def _safe_float(value: object) -> float:
     return float(value) if value is not None else 0.0
 
 
-def compute_stage_forgetting_series(accuracy_matrix: List[List[float]], num_tasks: int) -> List[float]:
+def compute_stage_forgetting_series(
+    accuracy_matrix: List[List[float]], num_tasks: int
+) -> List[float]:
     stage_forgetting = []
     for stage in range(num_tasks):
         forgetting_terms = []
         for task_id in range(stage):
-            seen_history = [accuracy_matrix[past_stage][task_id] for past_stage in range(task_id, stage + 1)]
+            seen_history = [
+                accuracy_matrix[past_stage][task_id] for past_stage in range(task_id, stage + 1)
+            ]
             forgetting_terms.append(max(seen_history) - accuracy_matrix[stage][task_id])
         stage_forgetting.append(float(sum(forgetting_terms) / max(1, len(forgetting_terms))))
     return stage_forgetting
 
 
-def compute_stage_task_forgetting(accuracy_matrix: List[List[float]], num_tasks: int) -> List[List[float]]:
+def compute_stage_task_forgetting(
+    accuracy_matrix: List[List[float]], num_tasks: int
+) -> List[List[float]]:
     stage_task_forgetting = []
     for stage in range(num_tasks):
         task_forgetting = []
         for task_id in range(stage + 1):
-            seen_history = [accuracy_matrix[past_stage][task_id] for past_stage in range(task_id, stage + 1)]
+            seen_history = [
+                accuracy_matrix[past_stage][task_id] for past_stage in range(task_id, stage + 1)
+            ]
             task_forgetting.append(float(max(seen_history) - accuracy_matrix[stage][task_id]))
         stage_task_forgetting.append(task_forgetting)
     return stage_task_forgetting
@@ -235,63 +268,83 @@ def compute_theory_diagnostics(
 ) -> Dict[str, object]:
     stage_forgetting = compute_stage_forgetting_series(accuracy_matrix, len(accuracy_matrix))
     stage_task_forgetting = compute_stage_task_forgetting(accuracy_matrix, len(accuracy_matrix))
-    stage_avg_accuracy = [float(sum(row[: stage + 1]) / max(1, stage + 1)) for stage, row in enumerate(accuracy_matrix)]
-    stage_transport_gap = [_safe_float(item.get("mean_transport_gap")) for item in prototype_lifecycle]
-    stage_max_transport_gap = [_safe_float(item.get("max_transport_gap")) for item in prototype_lifecycle]
-    stage_routing_stability = [_safe_float(item.get("routing_stability_loss")) for item in stage_training_metrics]
-    stage_stability_loss = [_safe_float(item.get("stability_loss")) for item in stage_training_metrics]
+    stage_avg_accuracy = [
+        float(sum(row[: stage + 1]) / max(1, stage + 1))
+        for stage, row in enumerate(accuracy_matrix)
+    ]
+    stage_transport_gap = [
+        _safe_float(item.get("mean_transport_gap")) for item in prototype_lifecycle
+    ]
+    stage_max_transport_gap = [
+        _safe_float(item.get("max_transport_gap")) for item in prototype_lifecycle
+    ]
+    stage_routing_stability = [
+        _safe_float(item.get("routing_stability_loss")) for item in stage_training_metrics
+    ]
+    stage_stability_loss = [
+        _safe_float(item.get("stability_loss")) for item in stage_training_metrics
+    ]
     stage_overlap_loss = [_safe_float(item.get("overlap_loss")) for item in stage_training_metrics]
-    stage_transport_loss = [_safe_float(item.get("transport_loss")) for item in stage_training_metrics]
+    stage_transport_loss = [
+        _safe_float(item.get("transport_loss")) for item in stage_training_metrics
+    ]
     stage_weighted_transport_loss = [
         _safe_float(item.get("weighted_transport_loss", item.get("transport_loss")))
         for item in stage_training_metrics
     ]
     stage_candidate_support_residual = [
-        _safe_float(item.get("candidate_support_residual"))
-        for item in stage_training_metrics
+        _safe_float(item.get("candidate_support_residual")) for item in stage_training_metrics
     ]
     stage_support_projection_residual = [
-        _safe_float(item.get("support_projection_residual"))
-        for item in stage_training_metrics
+        _safe_float(item.get("support_projection_residual")) for item in stage_training_metrics
     ]
     stage_support_residual_delta = [
-        _safe_float(item.get("support_residual_delta"))
-        for item in stage_training_metrics
+        _safe_float(item.get("support_residual_delta")) for item in stage_training_metrics
     ]
     stage_target_capacity_residual = [
-        _safe_float(item.get("target_capacity_residual"))
-        for item in stage_training_metrics
+        _safe_float(item.get("target_capacity_residual")) for item in stage_training_metrics
     ]
     stage_effective_capacity_residual = [
-        _safe_float(item.get("effective_capacity_residual"))
-        for item in stage_training_metrics
+        _safe_float(item.get("effective_capacity_residual")) for item in stage_training_metrics
     ]
-    stage_support_density = [_safe_float(item.get("support_density")) for item in stage_training_metrics]
+    stage_support_density = [
+        _safe_float(item.get("support_density")) for item in stage_training_metrics
+    ]
     stage_support_size = [_safe_float(item.get("support_size")) for item in stage_training_metrics]
     stage_support_active_prototypes = [
-        _safe_float(item.get("support_active_prototypes"))
-        for item in stage_training_metrics
+        _safe_float(item.get("support_active_prototypes")) for item in stage_training_metrics
     ]
     stage_support_weight_leakage = [
-        _safe_float(item.get("support_weight_leakage"))
-        for item in stage_training_metrics
+        _safe_float(item.get("support_weight_leakage")) for item in stage_training_metrics
     ]
     stage_capacity_bias_selection_rate = [
-        _safe_float(item.get("capacity_bias_selection_rate"))
-        for item in stage_training_metrics
+        _safe_float(item.get("capacity_bias_selection_rate")) for item in stage_training_metrics
     ]
     stage_merge_count = [_safe_float(item.get("merge_count")) for item in prototype_lifecycle]
-    stage_birkhoff_base_strength = [_safe_float(item.get("birkhoff_base_strength")) for item in prototype_lifecycle]
-    stage_birkhoff_strength = [_safe_float(item.get("birkhoff_strength")) for item in prototype_lifecycle]
-    stage_birkhoff_gate_factor = [_safe_float(item.get("birkhoff_gate_factor")) for item in prototype_lifecycle]
-    stage_birkhoff_offdiag_mass = [_safe_float(item.get("birkhoff_offdiag_mass")) for item in prototype_lifecycle]
-    stage_birkhoff_applied_offdiag_mass = [
-        _safe_float(item.get("birkhoff_applied_offdiag_mass"))
-        for item in prototype_lifecycle
+    stage_birkhoff_base_strength = [
+        _safe_float(item.get("birkhoff_base_strength")) for item in prototype_lifecycle
     ]
-    stage_birkhoff_row_error = [_safe_float(item.get("birkhoff_row_error")) for item in prototype_lifecycle]
-    stage_birkhoff_col_error = [_safe_float(item.get("birkhoff_col_error")) for item in prototype_lifecycle]
-    stage_birkhoff_gap_delta = [_safe_float(item.get("birkhoff_gap_delta")) for item in prototype_lifecycle]
+    stage_birkhoff_strength = [
+        _safe_float(item.get("birkhoff_strength")) for item in prototype_lifecycle
+    ]
+    stage_birkhoff_gate_factor = [
+        _safe_float(item.get("birkhoff_gate_factor")) for item in prototype_lifecycle
+    ]
+    stage_birkhoff_offdiag_mass = [
+        _safe_float(item.get("birkhoff_offdiag_mass")) for item in prototype_lifecycle
+    ]
+    stage_birkhoff_applied_offdiag_mass = [
+        _safe_float(item.get("birkhoff_applied_offdiag_mass")) for item in prototype_lifecycle
+    ]
+    stage_birkhoff_row_error = [
+        _safe_float(item.get("birkhoff_row_error")) for item in prototype_lifecycle
+    ]
+    stage_birkhoff_col_error = [
+        _safe_float(item.get("birkhoff_col_error")) for item in prototype_lifecycle
+    ]
+    stage_birkhoff_gap_delta = [
+        _safe_float(item.get("birkhoff_gap_delta")) for item in prototype_lifecycle
+    ]
     stage_mean_abs_excess = []
     stage_routing_entropy = []
     stage_task_transport_gap = []
@@ -303,9 +356,15 @@ def compute_theory_diagnostics(
         stage_mean_abs_excess.append(float(np.mean(flattened_excess)) if flattened_excess else 0.0)
         entropies = stage.get("task_routing_entropy", [])
         stage_routing_entropy.append(float(np.mean(entropies)) if entropies else 0.0)
-        stage_task_transport_gap.append([float(value) for value in stage.get("task_transport_gap", [])])
-        stage_task_max_transport_gap.append([float(value) for value in stage.get("task_max_transport_gap", [])])
-        stage_task_transport_loss.append([float(value) for value in stage.get("task_transport_loss", [])])
+        stage_task_transport_gap.append(
+            [float(value) for value in stage.get("task_transport_gap", [])]
+        )
+        stage_task_max_transport_gap.append(
+            [float(value) for value in stage.get("task_max_transport_gap", [])]
+        )
+        stage_task_transport_loss.append(
+            [float(value) for value in stage.get("task_transport_loss", [])]
+        )
 
     def correlation(series_a: List[float], series_b: List[float]) -> Optional[float]:
         if len(series_a) != len(series_b) or len(series_a) < 2:
@@ -357,16 +416,28 @@ def compute_theory_diagnostics(
             "transport_gap": correlation(stage_forgetting, stage_transport_gap),
             "transport_loss": correlation(stage_forgetting, stage_transport_loss),
             "weighted_transport_loss": correlation(stage_forgetting, stage_weighted_transport_loss),
-            "candidate_support_residual": correlation(stage_forgetting, stage_candidate_support_residual),
-            "support_projection_residual": correlation(stage_forgetting, stage_support_projection_residual),
+            "candidate_support_residual": correlation(
+                stage_forgetting, stage_candidate_support_residual
+            ),
+            "support_projection_residual": correlation(
+                stage_forgetting, stage_support_projection_residual
+            ),
             "support_residual_delta": correlation(stage_forgetting, stage_support_residual_delta),
-            "target_capacity_residual": correlation(stage_forgetting, stage_target_capacity_residual),
-            "effective_capacity_residual": correlation(stage_forgetting, stage_effective_capacity_residual),
+            "target_capacity_residual": correlation(
+                stage_forgetting, stage_target_capacity_residual
+            ),
+            "effective_capacity_residual": correlation(
+                stage_forgetting, stage_effective_capacity_residual
+            ),
             "support_density": correlation(stage_forgetting, stage_support_density),
             "support_size": correlation(stage_forgetting, stage_support_size),
-            "support_active_prototypes": correlation(stage_forgetting, stage_support_active_prototypes),
+            "support_active_prototypes": correlation(
+                stage_forgetting, stage_support_active_prototypes
+            ),
             "support_weight_leakage": correlation(stage_forgetting, stage_support_weight_leakage),
-            "capacity_bias_selection_rate": correlation(stage_forgetting, stage_capacity_bias_selection_rate),
+            "capacity_bias_selection_rate": correlation(
+                stage_forgetting, stage_capacity_bias_selection_rate
+            ),
             "max_transport_gap": correlation(stage_forgetting, stage_max_transport_gap),
             "mean_abs_excess": correlation(stage_forgetting, stage_mean_abs_excess),
             "merge_count": correlation(stage_forgetting, stage_merge_count),
@@ -480,7 +551,9 @@ def build_dual_transport_gradients(
     stage_task_forgetting = theory_diagnostics.get("stage_task_forgetting", [])
     stage_task_transport_gap = theory_diagnostics.get("stage_task_transport_gap", [])
     stage_task_transport_loss = theory_diagnostics.get("stage_task_transport_loss", [])
-    latest_task_forgetting = [float(value) for value in (stage_task_forgetting[-1] if stage_task_forgetting else [])]
+    latest_task_forgetting = [
+        float(value) for value in (stage_task_forgetting[-1] if stage_task_forgetting else [])
+    ]
     previous_task_forgetting = []
     if len(stage_task_forgetting) >= 2:
         previous_task_forgetting = [float(value) for value in stage_task_forgetting[-2]]
@@ -488,7 +561,8 @@ def build_dual_transport_gradients(
         float(value) for value in (stage_task_transport_gap[-1] if stage_task_transport_gap else [])
     ]
     latest_task_transport_loss = [
-        float(value) for value in (stage_task_transport_loss[-1] if stage_task_transport_loss else [])
+        float(value)
+        for value in (stage_task_transport_loss[-1] if stage_task_transport_loss else [])
     ]
 
     current_task_weights = get_task_transport_weights(args, len(latest_task_forgetting))
@@ -500,12 +574,22 @@ def build_dual_transport_gradients(
     relaxation = float(np.clip(0.5 * args.transport_weight_step, 0.0, 0.5))
 
     for task_id, forgetting in enumerate(latest_task_forgetting):
-        previous_forgetting = previous_task_forgetting[task_id] if task_id < len(previous_task_forgetting) else 0.0
+        previous_forgetting = (
+            previous_task_forgetting[task_id] if task_id < len(previous_task_forgetting) else 0.0
+        )
         forgetting_pressure = max(0.0, forgetting - target)
         forgetting_trend = max(0.0, forgetting - previous_forgetting)
         activation = min(1.0, (max(0.0, forgetting) + 0.5 * forgetting_trend) / target)
-        task_gap = latest_task_transport_gap[task_id] if task_id < len(latest_task_transport_gap) else transport_gap
-        task_loss = latest_task_transport_loss[task_id] if task_id < len(latest_task_transport_loss) else transport_loss
+        task_gap = (
+            latest_task_transport_gap[task_id]
+            if task_id < len(latest_task_transport_gap)
+            else transport_gap
+        )
+        task_loss = (
+            latest_task_transport_loss[task_id]
+            if task_id < len(latest_task_transport_loss)
+            else transport_loss
+        )
         task_gap_signals[task_id] = float(max(0.0, task_gap))
         task_loss_signals[task_id] = float(max(0.0, task_loss))
         task_signal = activation * (
@@ -520,9 +604,7 @@ def build_dual_transport_gradients(
             updated_weight = current_weight * np.exp(args.transport_weight_step * task_signal)
         else:
             updated_weight = base_weight + (current_weight - base_weight) * (1.0 - relaxation)
-        updated_task_weights[task_id] = float(
-            min(1.0, max(1e-4, updated_weight))
-        )
+        updated_task_weights[task_id] = float(min(1.0, max(1e-4, updated_weight)))
 
     effective_transport_weight = (
         float(np.mean(updated_task_weights[: len(latest_task_forgetting)]))
@@ -538,6 +620,7 @@ def build_dual_transport_gradients(
         "meta_objective": float(meta_terms["objective"]),
     }
 
+
 def build_meta_secant_bootstrap_gradients(
     theory_diagnostics: Dict[str, object],
     args: RealBenchmarkArgs,
@@ -545,7 +628,9 @@ def build_meta_secant_bootstrap_gradients(
     correlations = theory_diagnostics.get("forgetting_correlations", {})
     meta_terms = compute_meta_objective(theory_diagnostics, args)
     forgetting_pressure = max(0.0, meta_terms["forgetting_gap"])
-    gap_pressure = max(0.0, meta_terms["transport_gap"]) + max(0.0, meta_terms["transport_gap_delta"])
+    gap_pressure = max(0.0, meta_terms["transport_gap"]) + max(
+        0.0, meta_terms["transport_gap_delta"]
+    )
     transport_pressure = max(0.0, meta_terms["transport_loss"])
     excess_pressure = max(0.0, meta_terms["mean_abs_excess"])
     stability_pressure = max(0.0, meta_terms["routing_stability"])
@@ -557,22 +642,22 @@ def build_meta_secant_bootstrap_gradients(
     recent_forgetting = stage_forgetting[-2:]
     sustained_forgetting_pressure = 0.0
     if len(recent_forgetting) == 2:
-        sustained_forgetting_pressure = min(
-            max(0.0, recent_forgetting[0] - target_forgetting),
-            max(0.0, recent_forgetting[1] - target_forgetting),
-        ) / target_forgetting
+        sustained_forgetting_pressure = (
+            min(
+                max(0.0, recent_forgetting[0] - target_forgetting),
+                max(0.0, recent_forgetting[1] - target_forgetting),
+            )
+            / target_forgetting
+        )
         sustained_forgetting_pressure = min(1.0, sustained_forgetting_pressure)
     forgetting_activation = compute_forgetting_activation(meta_terms, args)
     sparsity_activation = forgetting_activation * (0.5 + 0.5 * sharpness)
-    transport_regularization_need = (
-        forgetting_activation
-        * (
-            forgetting_pressure
-            + 0.5 * gap_pressure
-            + 0.5 * transport_pressure
-            + 0.25 * excess_pressure
-            + 0.25 * transport_corr
-        )
+    transport_regularization_need = forgetting_activation * (
+        forgetting_pressure
+        + 0.5 * gap_pressure
+        + 0.5 * transport_pressure
+        + 0.25 * excess_pressure
+        + 0.25 * transport_corr
     )
     specialization_need = (
         sustained_forgetting_pressure
@@ -606,6 +691,7 @@ def build_meta_secant_bootstrap_gradients(
         "transport_weight": -transport_regularization_need,
         "prototype_top_k": specialization_need,
     }
+
 
 def merge_hypergradients(
     heuristic_gradients: Dict[str, float],
@@ -641,7 +727,9 @@ def apply_meta_hyperparameter_update(
     updated_transport = current.get("transport_weight", 0.0) - (
         args.transport_weight_step * gradients.get("transport_weight", 0.0)
     )
-    max_prototype_top_k = max(1, int(max_prototype_top_k or round(float(current.get("prototype_top_k", 1)))))
+    max_prototype_top_k = max(
+        1, int(max_prototype_top_k or round(float(current.get("prototype_top_k", 1))))
+    )
     updated_top_k = current.get("prototype_top_k", 1.0) - (
         args.prototype_topk_step * gradients.get("prototype_top_k", 0.0)
     )
@@ -736,8 +824,12 @@ def adapt_hyperparameters_from_diagnostics(
 
     if args.adaptation_strategy == "dual_transport":
         updated = dict(current)
-        updated["transport_weight"] = float(dual_update.get("effective_transport_weight", args.transport_weight))
-        updated["task_transport_weights"] = list(dual_update.get("task_transport_weights", current.get("task_transport_weights", [])))
+        updated["transport_weight"] = float(
+            dual_update.get("effective_transport_weight", args.transport_weight)
+        )
+        updated["task_transport_weights"] = list(
+            dual_update.get("task_transport_weights", current.get("task_transport_weights", []))
+        )
         updated["prototype_top_k"] = int(current.get("prototype_top_k", 1))
         args.task_transport_weights = list(updated["task_transport_weights"])
     else:
@@ -754,7 +846,9 @@ def adapt_hyperparameters_from_diagnostics(
         prototype_top_k=updated.get("prototype_top_k"),
     )
     args.transport_weight = float(updated.get("transport_weight", args.transport_weight))
-    if args.adaptation_strategy == "dual_transport" and hasattr(model, "set_task_transport_weights"):
+    if args.adaptation_strategy == "dual_transport" and hasattr(
+        model, "set_task_transport_weights"
+    ):
         model.set_task_transport_weights(
             get_task_transport_weights(args, model.num_tasks),
             base_weight=args.transport_weight,
@@ -783,14 +877,29 @@ def adapt_hyperparameters_from_diagnostics(
             "excess_correlation": correlations.get("mean_abs_excess"),
             "controller_transport_signal": float(-gradients.get("transport_weight", 0.0)),
             "controller_topk_signal": float(gradients.get("prototype_top_k", 0.0)),
-            "task_transport_signals": list(dual_update.get("task_transport_signals", [])) if dual_update is not None else [],
-            "task_gap_signals": list(dual_update.get("task_gap_signals", [])) if dual_update is not None else [],
-            "task_loss_signals": list(dual_update.get("task_loss_signals", [])) if dual_update is not None else [],
+            "task_transport_signals": (
+                list(dual_update.get("task_transport_signals", []))
+                if dual_update is not None
+                else []
+            ),
+            "task_gap_signals": (
+                list(dual_update.get("task_gap_signals", [])) if dual_update is not None else []
+            ),
+            "task_loss_signals": (
+                list(dual_update.get("task_loss_signals", [])) if dual_update is not None else []
+            ),
         },
     }
 
 
-def train_task(model: ContinualTextClassifier, data_loader, optimizer, replay_buffer: ReplayBuffer, args: RealBenchmarkArgs, device: torch.device):
+def train_task(
+    model: ContinualTextClassifier,
+    data_loader,
+    optimizer,
+    replay_buffer: ReplayBuffer,
+    args: RealBenchmarkArgs,
+    device: torch.device,
+):
     criterion = nn.CrossEntropyLoss()
     model.train()
     metric_sums = {
@@ -821,10 +930,12 @@ def train_task(model: ContinualTextClassifier, data_loader, optimizer, replay_bu
 
             optimizer.zero_grad()
             logits, info = model(inputs, task_ids=task_ids, return_info=True)
-            weighted_transport_loss, effective_transport_weight = compute_task_conditioned_transport_penalty(
-                args,
-                info,
-                task_ids,
+            weighted_transport_loss, effective_transport_weight = (
+                compute_task_conditioned_transport_penalty(
+                    args,
+                    info,
+                    task_ids,
+                )
             )
             loss = criterion(logits, labels)
             loss = loss + args.overlap_weight * info["overlap_loss"]
@@ -841,13 +952,19 @@ def train_task(model: ContinualTextClassifier, data_loader, optimizer, replay_bu
             metric_sums["stability_loss"] += float(info["stability_loss"].item())
             metric_sums["balance_loss"] += float(info["balance_loss"].item())
             metric_sums["diversity_loss"] += float(info["diversity_loss"].item())
-            metric_sums["transport_loss"] += float(info.get("transport_loss", info["overlap_loss"]).item())
+            metric_sums["transport_loss"] += float(
+                info.get("transport_loss", info["overlap_loss"]).item()
+            )
             metric_sums["weighted_transport_loss"] += float(weighted_transport_loss.item())
             metric_sums["effective_transport_weight"] += float(effective_transport_weight)
-            metric_sums["routing_stability_loss"] += float(info.get("routing_stability_loss", info["stability_loss"]).item())
+            metric_sums["routing_stability_loss"] += float(
+                info.get("routing_stability_loss", info["stability_loss"]).item()
+            )
             step_count += 1
 
-            replay_buffer.add_batch(inputs.detach().cpu(), labels.detach().cpu(), task_ids.detach().cpu())
+            replay_buffer.add_batch(
+                inputs.detach().cpu(), labels.detach().cpu(), task_ids.detach().cpu()
+            )
 
     return {key: value / max(1, step_count) for key, value in metric_sums.items()}
 
@@ -866,6 +983,10 @@ def run_benchmark(args: RealBenchmarkArgs) -> Dict[str, object]:
         max_train_samples=args.max_train_samples,
         max_val_samples=args.max_val_samples,
     )
+    dataset_provenance = {
+        "train": extract_dataset_provenance(train_loaders),
+        "val": extract_dataset_provenance(val_loaders),
+    }
 
     num_tasks = len(train_loaders)
     if args.adaptation_strategy == "dual_transport":
@@ -904,7 +1025,9 @@ def run_benchmark(args: RealBenchmarkArgs) -> Dict[str, object]:
         prototype_masked_sinkhorn_capacity_bias=args.prototype_masked_sinkhorn_capacity_bias,
         prototype_relocation_strength=args.prototype_relocation_strength,
     )
-    if args.adaptation_strategy == "dual_transport" and hasattr(model, "set_task_transport_weights"):
+    if args.adaptation_strategy == "dual_transport" and hasattr(
+        model, "set_task_transport_weights"
+    ):
         model.set_task_transport_weights(
             get_task_transport_weights(args, num_tasks),
             base_weight=args.transport_weight,
@@ -968,6 +1091,7 @@ def run_benchmark(args: RealBenchmarkArgs) -> Dict[str, object]:
     )
     results = {
         "config": initial_config,
+        "dataset_provenance": dataset_provenance,
         "resolved_prototype_layout": initial_resolved_layout,
         "num_tasks": num_tasks,
         "accuracy_matrix": accuracy_matrix,
@@ -1033,9 +1157,13 @@ def save_benchmark_artifacts(results: Dict[str, object], output_json_path: Path)
         if forgetting:
             axes[1, 0].plot(stages[: len(forgetting)], forgetting, marker="s", label="forgetting")
         if transport_gap:
-            axes[1, 0].plot(stages[: len(transport_gap)], transport_gap, marker="^", label="transport gap")
+            axes[1, 0].plot(
+                stages[: len(transport_gap)], transport_gap, marker="^", label="transport gap"
+            )
         if transport_loss:
-            axes[1, 0].plot(stages[: len(transport_loss)], transport_loss, marker="x", label="transport loss")
+            axes[1, 0].plot(
+                stages[: len(transport_loss)], transport_loss, marker="x", label="transport loss"
+            )
         axes[1, 0].set_title("Theory Diagnostics by Stage")
         axes[1, 0].set_xlabel("Training Stage")
         axes[1, 0].legend()
@@ -1070,6 +1198,8 @@ def save_benchmark_artifacts(results: Dict[str, object], output_json_path: Path)
         "# Continual Text Benchmark Report",
         "",
         f"- Dataset: `{results['config']['dataset_name']}`",
+        f"- Dataset source (train): `{results.get('dataset_provenance', {}).get('train', {}).get('source_kind', 'unknown')}`",
+        f"- Dataset source (val): `{results.get('dataset_provenance', {}).get('val', {}).get('source_kind', 'unknown')}`",
         f"- Routing mode: `{results['config']['routing_mode']}`",
         f"- Routing strategy: `{results['config'].get('prototype_routing_strategy', 'n/a')}`",
         f"- Tasks: `{results['num_tasks']}`",

@@ -3,6 +3,8 @@
 ## Run Config
 
 - Dataset: `split_ag_news`
+- Dataset source (train): `huggingface`
+- Dataset source (val): `huggingface`
 - Output directory: `experiments\paper_suite_canonical_smoke`
 - Device: `cpu`
 - Seeds for ablation: `1`

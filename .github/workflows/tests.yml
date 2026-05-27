@@ -67,6 +67,7 @@ jobs:
           pytest -q \
             tests/test_ci_workflow.py \
             tests/test_experiment_artifact_audit.py \
+            tests/test_text_dataset_provenance.py \
             tests/test_basic.py \
             tests/test_asam.py \
             tests/test_efficient.py \
