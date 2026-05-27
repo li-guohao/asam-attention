@@ -124,12 +124,12 @@
     "python_version": "3.13.11",
     "torch_version": "2.11.0+cu126",
     "platform": "Windows-11-10.0.22000-SP0",
-    "started_at_utc": "2026-05-27T01:31:21.151546Z",
-    "finished_at_utc": "2026-05-27T01:33:11.005025Z",
+    "started_at_utc": "2026-05-27T01:38:59.777337Z",
+    "finished_at_utc": "2026-05-27T01:40:37.763784Z",
     "git": {
-      "commit": "26a9c488255991eb2ba69c2eb4112f2d801f8f3f",
-      "dirty": true,
-      "status_porcelain": "M .github/workflows/tests.yml\n M datasets/text_dataset.py\n M experiments/run_continual_text_benchmark.py\n M scripts/audit_experiment_artifacts.py\n M scripts/run_continual_paper_suite.py\n M tests/test_continual_real_benchmark.py\n M tests/test_experiment_artifact_audit.py\n M tests/test_paper_pipeline.py\n?? tests/test_text_dataset_provenance.py"
+      "commit": "aae9ba4ca2fae84b9df397862195e51c03166857",
+      "dirty": false,
+      "status_porcelain": ""
     },
     "dataset": {
       "name": "split_ag_news",
