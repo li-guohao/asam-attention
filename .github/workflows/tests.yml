@@ -90,6 +90,7 @@ jobs:
             tests/test_continual_operator_ablation.py \
             tests/test_continual_capacity_sweep.py \
             tests/test_paper_pipeline.py \
+            tests/test_paper_generate_figures.py \
             tests/test_sync_continual_appendix.py \
             tests/test_long_context_paper_suite.py \
             --cov=asam --cov-report=xml --cov-report=term

@@ -1,527 +1,404 @@
 """
-Generate Figures for ASAM Paper
-================================
+Generate artifact-backed figures for the ASAM paper draft.
 
-This script generates publication-quality figures for the paper.
-Run this after installing dependencies: pip install torch matplotlib seaborn
+Paper-facing numerical plots must be traceable to saved JSON/CSV artifacts.
+When an audited artifact is unavailable, this script skips the corresponding
+plot instead of fabricating placeholder values.
 """
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
+import hashlib
 import json
-import os
+from collections import defaultdict
+from pathlib import Path
 
-# Set style for publication
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+
 sns.set_style("whitegrid")
-plt.rcParams['font.size'] = 11
-plt.rcParams['axes.labelsize'] = 12
-plt.rcParams['axes.titlesize'] = 13
-plt.rcParams['legend.fontsize'] = 10
-plt.rcParams['figure.dpi'] = 150
+plt.rcParams["font.size"] = 11
+plt.rcParams["axes.labelsize"] = 12
+plt.rcParams["axes.titlesize"] = 13
+plt.rcParams["legend.fontsize"] = 10
+plt.rcParams["figure.dpi"] = 150
 
-# Create figures directory
-os.makedirs('figures', exist_ok=True)
+FIGURES_DIR = Path("figures")
+LONG_CONTEXT_JSON = Path("experiments/paper_suite_long_context_smoke/long_context_benchmark.json")
+LONG_CONTEXT_BENCHMARK_NAME = "lra_style_synthetic_diagnostic"
+TEXT_ARTIFACT_SUFFIXES = {".csv", ".json", ".md", ".tex", ".txt"}
+REQUIRED_LONG_CONTEXT_MODELS = {"asam", "transformer", "local", "longformer_style"}
+REQUIRED_LONG_CONTEXT_METRICS = {
+    "latency_ms_mean",
+    "latency_ms_std",
+    "peak_memory_mb",
+    "finite_output_rate",
+}
+REQUIRED_RESULT_FIELDS = {
+    "model",
+    "sequence_length",
+    "latency_ms_mean",
+    "finite_output_rate",
+}
+MIN_LONG_CONTEXT_SEQUENCE_LENGTHS = 3
 
 
-def load_lra_results(json_path="experiments/lra_results.json"):
-    """Load real benchmark results from JSON, fall back to simulated if missing.
-
-    Returns:
-        List of result dicts or None if file not found.
-    """
+def _load_json(path):
     try:
-        with open(json_path) as f:
-            data = json.load(f)
-        # Filter out error entries
-        valid = [r for r in data if "error" not in r]
-        if len(valid) > 0:
-            print(f"Loaded {len(valid)} benchmark results from {json_path}")
-            return valid
-        else:
-            print(f"Warning: {json_path} contains only errors, using simulated data")
-            return None
+        with Path(path).open(encoding="utf-8") as handle:
+            return json.load(handle)
     except FileNotFoundError:
-        print(f"Warning: {json_path} not found; skipping unaudited LRA table values")
+        print(f"Skipped: {path} is unavailable.")
         return None
 
 
-def load_ablation_results(json_path="experiments/ablation_results.json"):
-    """Load real ablation results from JSON, fall back to simulated if missing.
+def _file_sha256(path):
+    content = Path(path).read_bytes()
+    if Path(path).suffix.lower() in TEXT_ARTIFACT_SUFFIXES:
+        content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(content).hexdigest()
 
-    Returns:
-        List of result dicts or None if file not found.
-    """
-    try:
-        with open(json_path) as f:
-            data = json.load(f)
-        valid = [r for r in data if "error" not in r]
-        if len(valid) > 0:
-            print(f"Loaded {len(valid)} ablation results from {json_path}")
-            return valid
-        else:
-            return None
-    except FileNotFoundError:
-        print(f"Warning: {json_path} not found; skipping unaudited ablation table values")
+
+def _load_manifest_for_benchmark(json_path):
+    manifest_path = Path(json_path).parent / "paper_suite_manifest.json"
+    manifest = _load_json(manifest_path)
+    if manifest is None:
+        return None
+    if manifest.get("suite_type") != "long_context":
+        print(f"Skipped: {manifest_path} is not a long-context suite manifest.")
+        return None
+    return manifest
+
+
+def _validate_manifest_hash(json_path, manifest):
+    output_hashes = manifest.get("provenance", {}).get("output_hashes", {})
+    if not isinstance(output_hashes, dict):
+        print("Skipped: manifest has no provenance.output_hashes mapping.")
+        return False
+
+    relative_name = Path(json_path).name
+    expected_hash = output_hashes.get(relative_name)
+    if not expected_hash:
+        print(f"Skipped: manifest does not cover {relative_name}.")
+        return False
+
+    actual_hash = _file_sha256(json_path)
+    if actual_hash != expected_hash:
+        print(f"Skipped: manifest hash mismatch for {relative_name}.")
+        return False
+    return True
+
+
+def _validate_manifest_claim_scope(data, manifest):
+    benchmark = manifest.get("provenance", {}).get("benchmark")
+    if not isinstance(benchmark, dict):
+        print("Skipped: manifest has no provenance.benchmark section.")
+        return False
+
+    expected = {
+        "suite_type": "long_context",
+        "benchmark_name": benchmark.get("name"),
+        "claim_scope": "diagnostic_only",
+    }
+    mismatches = {
+        key: (data.get(key), value) for key, value in expected.items() if data.get(key) != value
+    }
+    if benchmark.get("source_kind") != "synthetic":
+        mismatches["source_kind"] = (benchmark.get("source_kind"), "synthetic")
+    if benchmark.get("name") != LONG_CONTEXT_BENCHMARK_NAME:
+        mismatches["benchmark_name"] = (benchmark.get("name"), LONG_CONTEXT_BENCHMARK_NAME)
+    if mismatches:
+        print(f"Skipped: benchmark artifact is outside diagnostic scope: {mismatches}")
+        return False
+
+    for key in ["sequence_lengths", "models"]:
+        if data.get(key) != benchmark.get(key):
+            print(f"Skipped: benchmark {key} does not match manifest provenance.")
+            return False
+
+    models = data.get("models")
+    metric_names = benchmark.get("metric_names")
+    if not isinstance(models, list) or not REQUIRED_LONG_CONTEXT_MODELS.issubset(set(models)):
+        print("Skipped: benchmark does not include all required long-context models.")
+        return False
+    if not isinstance(metric_names, list) or not REQUIRED_LONG_CONTEXT_METRICS.issubset(
+        set(metric_names)
+    ):
+        print("Skipped: manifest does not include required long-context metrics.")
+        return False
+
+    return True
+
+
+def _successful_rows(data):
+    return [row for row in data.get("results", []) if row.get("success", True)]
+
+
+def _validate_result_rows(data):
+    rows = _successful_rows(data)
+    if not rows:
+        print("Skipped: benchmark artifact has no successful result rows.")
+        return False
+
+    sequence_lengths = data.get("sequence_lengths")
+    models = data.get("models")
+    if not isinstance(sequence_lengths, list) or len(sequence_lengths) < MIN_LONG_CONTEXT_SEQUENCE_LENGTHS:
+        print("Skipped: benchmark does not cover the required sequence-length grid.")
+        return False
+    if not isinstance(models, list):
+        print("Skipped: benchmark does not declare compared models.")
+        return False
+
+    expected_pairs = {(model, length) for model in models for length in sequence_lengths}
+    observed_pairs = set()
+    for index, row in enumerate(rows):
+        missing = REQUIRED_RESULT_FIELDS - set(row)
+        if missing:
+            print(f"Skipped: result row {index} is missing fields: {sorted(missing)}")
+            return False
+        observed_pairs.add((row["model"], row["sequence_length"]))
+
+    missing_pairs = expected_pairs - observed_pairs
+    if missing_pairs:
+        print(f"Skipped: benchmark is missing result rows: {sorted(missing_pairs)}")
+        return False
+
+    unexpected_pairs = observed_pairs - expected_pairs
+    if unexpected_pairs:
+        print(f"Skipped: benchmark has undeclared result rows: {sorted(unexpected_pairs)}")
+        return False
+
+    return True
+
+
+def load_long_context_diagnostic(json_path=LONG_CONTEXT_JSON):
+    """Load the manifest-audited long-context diagnostic artifact."""
+
+    data = _load_json(json_path)
+    if data is None:
         return None
 
+    manifest = _load_manifest_for_benchmark(json_path)
+    if manifest is None:
+        return None
 
-def generate_figure1_lra_results():
-    """Figure 1: Long Range Arena Results Comparison"""
+    if not _validate_manifest_hash(json_path, manifest):
+        return None
 
-    results = load_lra_results()
+    if not _validate_manifest_claim_scope(data, manifest):
+        return None
 
-    if results is not None:
-        # Build from real data (measured on RTX 3060 / derived from experiments/lra_results.json)
-        models_order = ["transformer", "local", "asam"]
-        tasks_order = ["listops", "text", "retrieval", "image", "pathfinder"]
+    if not _validate_result_rows(data):
+        return None
 
-        # Extract accuracies from results dict, grouped by model and task
-        acc_map = {}
-        for r in results:
-            key = (r["model"], r["task"])
-            acc_map[key] = r["accuracy"]
+    return data
 
-        models = ['Transformer', 'Local Attn', 'ASAM (Ours)']
-        listops    = [acc_map.get((m, "listops"), 0)    for m in models_order]
-        text       = [acc_map.get((m, "text"), 0)       for m in models_order]
-        retrieval  = [acc_map.get((m, "retrieval"), 0)  for m in models_order]
-        image      = [acc_map.get((m, "image"), 0)      for m in models_order]
-        pathfinder = [acc_map.get((m, "pathfinder"), 0) for m in models_order]
+
+def _rows_by_model(rows):
+    grouped = defaultdict(list)
+    for row in rows:
+        grouped[row["model"]].append(row)
+    for model_rows in grouped.values():
+        model_rows.sort(key=lambda item: item["sequence_length"])
+    return grouped
+
+
+def _save(fig, stem):
+    FIGURES_DIR.mkdir(exist_ok=True)
+    pdf_path = FIGURES_DIR / f"{stem}.pdf"
+    png_path = FIGURES_DIR / f"{stem}.png"
+    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Generated: {pdf_path}")
+    return [pdf_path, png_path]
+
+
+def generate_long_context_latency_figure():
+    """Plot CPU smoke latency from the LRA-style synthetic diagnostic artifact."""
+
+    data = load_long_context_diagnostic()
+    if data is None:
+        return []
+
+    result_rows = _successful_rows(data)
+    grouped = _rows_by_model(result_rows)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for model, model_rows in grouped.items():
+        seq_lengths = [row["sequence_length"] for row in model_rows]
+        latency = [row["latency_ms_mean"] for row in model_rows]
+        latency_std = [row.get("latency_ms_std", 0.0) for row in model_rows]
+        ax.errorbar(seq_lengths, latency, yerr=latency_std, marker="o", label=model)
+
+    ax.set_xlabel("Sequence Length", fontweight="bold")
+    ax.set_ylabel("Latency (ms)", fontweight="bold")
+    ax.set_title("LRA-Style Synthetic Latency Diagnostic", fontweight="bold")
+    ax.set_xscale("log", base=2)
+    if any(row["latency_ms_mean"] > 0 for row in result_rows):
+        ax.set_yscale("log")
+    ax.legend(frameon=True)
+    ax.grid(True, alpha=0.3)
+    ax.text(
+        0.01,
+        -0.22,
+        "Diagnostic only: not an official LRA result or hardware speedup claim.",
+        transform=ax.transAxes,
+        fontsize=9,
+    )
+    fig.tight_layout()
+    return _save(fig, "figure1_long_context_latency_diagnostic")
+
+
+def generate_long_context_quality_figure():
+    """Plot finite-output and memory diagnostics from the saved artifact."""
+
+    data = load_long_context_diagnostic()
+    if data is None:
+        return []
+
+    result_rows = _successful_rows(data)
+    grouped = _rows_by_model(result_rows)
+    fig, (output_ax, memory_ax) = plt.subplots(1, 2, figsize=(12, 5))
+
+    for model, model_rows in grouped.items():
+        seq_lengths = [row["sequence_length"] for row in model_rows]
+        finite_rate = [row["finite_output_rate"] for row in model_rows]
+        memory = [row.get("peak_memory_mb", 0.0) for row in model_rows]
+        output_ax.plot(seq_lengths, finite_rate, marker="o", label=model)
+        memory_ax.plot(seq_lengths, memory, marker="o", label=model)
+
+    output_ax.set_xlabel("Sequence Length", fontweight="bold")
+    output_ax.set_ylabel("Finite Output Rate", fontweight="bold")
+    output_ax.set_title("Output Validity Diagnostic", fontweight="bold")
+    output_ax.set_xscale("log", base=2)
+    output_ax.set_ylim(0, 1.05)
+    output_ax.grid(True, alpha=0.3)
+
+    memory_ax.set_xlabel("Sequence Length", fontweight="bold")
+    memory_ax.set_ylabel("Peak Memory (MB)", fontweight="bold")
+    memory_ax.set_title("Recorded Memory Diagnostic", fontweight="bold")
+    memory_ax.set_xscale("log", base=2)
+    if any(row.get("peak_memory_mb", 0.0) > 0 for row in result_rows):
+        memory_ax.set_yscale("log")
     else:
-        # Diagnostic placeholder data for plot layout only.
-        models = ['Transformer', 'Local Attn', 'Sparse\nTransformer', 'Longformer',
-                  'Linformer', 'Performer', 'ASAM (Ours)']
+        memory_ax.text(
+            0.5,
+            0.5,
+            "CPU smoke run records 0 MB\nfor all compared operators.",
+            ha="center",
+            va="center",
+            transform=memory_ax.transAxes,
+        )
+    memory_ax.grid(True, alpha=0.3)
+    memory_ax.legend(frameon=True)
 
-        listops = [36.4, 15.8, 17.1, 35.7, 35.7, 18.0, 37.2]
-        text = [64.3, 52.9, 63.6, 62.8, 53.9, 65.4, 65.1]
-        retrieval = [57.5, 53.4, 59.6, 56.9, 52.3, 53.1, 58.3]
-        image = [42.2, 41.5, 44.2, 42.2, 38.6, 42.8, 43.1]
-        pathfinder = [71.8, 69.4, 71.5, 69.4, 76.3, 77.1, 74.2]
-    
-    x = np.arange(len(models))
-    width = 0.15
-    
-    fig, ax = plt.subplots(figsize=(14, 6))
-    
-    colors = ['#E74C3C', '#3498DB', '#2ECC71', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22']
-    
-    ax.bar(x - 2*width, listops, width, label='ListOps', color=colors[0], alpha=0.8)
-    ax.bar(x - width, text, width, label='Text', color=colors[1], alpha=0.8)
-    ax.bar(x, retrieval, width, label='Retrieval', color=colors[2], alpha=0.8)
-    ax.bar(x + width, image, width, label='Image', color=colors[3], alpha=0.8)
-    ax.bar(x + 2*width, pathfinder, width, label='Pathfinder', color=colors[4], alpha=0.8)
-    
-    # Highlight ASAM
-    for i in range(len(models)):
-        if i == len(models) - 1:  # ASAM
-            ax.axvspan(i-0.4, i+0.4, alpha=0.1, color='red')
-    
-    ax.set_xlabel('Model', fontweight='bold')
-    ax.set_ylabel('Accuracy (%)', fontweight='bold')
-    ax.set_title('Long Range Arena (LRA) Benchmark Results', fontweight='bold', pad=15)
-    ax.set_xticks(x)
-    ax.set_xticklabels(models, rotation=0, ha='center')
-    ax.legend(loc='upper left', frameon=True, fancybox=True, shadow=True)
-    ax.set_ylim(0, 85)
-    ax.grid(axis='y', alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('figures/figure1_lra_results.pdf', bbox_inches='tight')
-    plt.savefig('figures/figure1_lra_results.png', bbox_inches='tight')
-    print("Generated: figures/figure1_lra_results.pdf")
-    plt.close()
+    fig.tight_layout()
+    return _save(fig, "figure2_long_context_quality_diagnostic")
 
-def generate_figure2_efficiency_comparison():
-    """Figure 2: Speed and Memory Efficiency
 
-    Data source: measured on RTX 3060 / derived from experiments/run_lra_benchmark.py
-    """
+def generate_sparse_pattern_schematic():
+    """Generate a non-result schematic of sparse support patterns."""
 
-    seq_lengths = [512, 1024, 2048, 4096, 8192, 16384]
-
-    # Time measurements (ms) — measured on RTX 3060
-    standard_time = [12.3, 45.6, 178.2, np.nan, np.nan, np.nan]  # OOM after 2048
-    asam_time = [8.1, 18.4, 42.1, 98.7, 215.3, 487.6]
-    longformer_time = [8.5, 19.2, 44.5, 105.3, 231.7, 528.4]
-    performer_time = [7.9, 18.1, 41.8, 97.2, 212.4, 481.9]
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    
-    # Left: Time comparison
-    ax1.plot(seq_lengths[:4], standard_time[:4], 'o-', linewidth=2.5, markersize=8, 
-             label='Standard Transformer', color='#E74C3C')
-    ax1.plot(seq_lengths, asam_time, 's-', linewidth=2.5, markersize=8, 
-             label='ASAM (Ours)', color='#2ECC71')
-    ax1.plot(seq_lengths, longformer_time, '^-', linewidth=2.5, markersize=8, 
-             label='Longformer', color='#3498DB', alpha=0.7)
-    ax1.plot(seq_lengths, performer_time, 'd-', linewidth=2.5, markersize=8, 
-             label='Performer', color='#F39C12', alpha=0.7)
-    
-    ax1.set_xlabel('Sequence Length', fontweight='bold')
-    ax1.set_ylabel('Time (ms)', fontweight='bold')
-    ax1.set_title('Inference Speed Comparison', fontweight='bold', pad=15)
-    ax1.set_xscale('log', base=2)
-    ax1.set_yscale('log')
-    ax1.legend(loc='upper left', frameon=True)
-    ax1.grid(True, alpha=0.3)
-    
-    # Add annotation for OOM
-    ax1.annotate('OOM', xy=(4096, 150), xytext=(4096, 300),
-                arrowprops=dict(arrowstyle='->', color='red', lw=2),
-                fontsize=10, color='red', fontweight='bold')
-    
-    # Right: Memory comparison
-    seq_lens_mem = [1024, 2048, 4096, 8192, 16384]
-    standard_mem = [4.2, 16.8, 67.1, np.nan, np.nan]
-    asam_mem = [2.3, 5.4, 16.8, 47.2, 134.6]
-    
-    ax2.plot(seq_lens_mem[:3], standard_mem[:3], 'o-', linewidth=2.5, markersize=8,
-             label='Standard Transformer', color='#E74C3C')
-    ax2.plot(seq_lens_mem, asam_mem, 's-', linewidth=2.5, markersize=8,
-             label='ASAM (Ours)', color='#2ECC71')
-    
-    # Fill area to show memory savings
-    ax2.fill_between(seq_lens_mem[:3], asam_mem[:3], standard_mem[:3], 
-                     alpha=0.3, color='green', label='Memory Savings')
-    
-    ax2.set_xlabel('Sequence Length', fontweight='bold')
-    ax2.set_ylabel('Peak Memory (MB)', fontweight='bold')
-    ax2.set_title('Memory Usage Comparison', fontweight='bold', pad=15)
-    ax2.set_xscale('log', base=2)
-    ax2.set_yscale('log')
-    ax2.legend(loc='upper left', frameon=True)
-    ax2.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('figures/figure2_efficiency.pdf', bbox_inches='tight')
-    plt.savefig('figures/figure2_efficiency.png', bbox_inches='tight')
-    print("Generated: figures/figure2_efficiency.pdf")
-    plt.close()
-
-def generate_figure3_sparse_patterns():
-    """Figure 3: Visualization of Sparse Attention Patterns"""
-    
     seq_len = 64
-    
-    # Create different patterns
     patterns = {}
-    
-    # Local pattern
+
     local = np.zeros((seq_len, seq_len))
     window = 8
-    for i in range(seq_len):
-        for j in range(max(0, i-window), min(seq_len, i+window+1)):
-            local[i, j] = 1
-    patterns['Local (Window=16)'] = local
-    
-    # Strided pattern
+    for query_idx in range(seq_len):
+        start = max(0, query_idx - window)
+        end = min(seq_len, query_idx + window + 1)
+        local[query_idx, start:end] = 1
+    patterns["Local Support"] = local
+
     strided = np.zeros((seq_len, seq_len))
     stride = 4
-    for i in range(seq_len):
-        for j in range(0, seq_len, stride):
-            strided[i, j] = 1
-        # Add local window
-        for j in range(max(0, i-4), min(seq_len, i+5)):
-            strided[i, j] = 1
-    patterns['Strided (Stride=8)'] = strided
-    
-    # Random pattern
-    np.random.seed(42)
-    random_p = np.random.rand(seq_len, seq_len) < 0.1
-    # Ensure some structure
-    for i in range(seq_len):
-        random_p[i, max(0, i-2):min(seq_len, i+3)] = True
-    patterns['Random (10%)'] = random_p.astype(float)
-    
-    # Hierarchical pattern (combination)
+    for query_idx in range(seq_len):
+        strided[query_idx, range(0, seq_len, stride)] = 1
+        start = max(0, query_idx - 4)
+        end = min(seq_len, query_idx + 5)
+        strided[query_idx, start:end] = 1
+    patterns["Strided + Local Support"] = strided
+
+    random_generator = np.random.default_rng(42)
+    random_support = random_generator.random((seq_len, seq_len)) < 0.1
+    for query_idx in range(seq_len):
+        start = max(0, query_idx - 2)
+        end = min(seq_len, query_idx + 3)
+        random_support[query_idx, start:end] = True
+    patterns["Seeded Random Support"] = random_support.astype(float)
+
     hierarchical = np.zeros((seq_len, seq_len))
-    # Local
-    for i in range(seq_len):
-        for j in range(max(0, i-4), min(seq_len, i+5)):
-            hierarchical[i, j] = 0.5
-    # Strided
-    for i in range(seq_len):
-        for j in range(0, seq_len, 8):
-            hierarchical[i, j] = 1.0
-    patterns['Hierarchical (Ours)'] = hierarchical
-    
+    for query_idx in range(seq_len):
+        start = max(0, query_idx - 4)
+        end = min(seq_len, query_idx + 5)
+        hierarchical[query_idx, start:end] = 0.5
+        hierarchical[query_idx, range(0, seq_len, 8)] = 1.0
+    patterns["Hierarchical Support"] = hierarchical
+
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    axes = axes.flatten()
-    
-    for idx, (name, pattern) in enumerate(patterns.items()):
-        ax = axes[idx]
-        im = ax.imshow(pattern, cmap='Blues', interpolation='nearest')
+    for ax, (name, pattern) in zip(axes.flatten(), patterns.items()):
+        image = ax.imshow(pattern, cmap="Blues", interpolation="nearest")
         sparsity = 1 - pattern.mean()
-        ax.set_title(f'{name}\nSparsity: {sparsity:.1%}', fontweight='bold')
-        ax.set_xlabel('Key Position')
-        ax.set_ylabel('Query Position')
-        
-        # Add grid
+        ax.set_title(f"{name}\nSparsity: {sparsity:.1%}", fontweight="bold")
+        ax.set_xlabel("Key Position")
+        ax.set_ylabel("Query Position")
         ax.set_xticks(np.arange(0, seq_len, 16))
         ax.set_yticks(np.arange(0, seq_len, 16))
-        ax.grid(True, alpha=0.3, color='gray', linewidth=0.5)
-        
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    
-    plt.suptitle('Sparse Attention Pattern Comparison', fontsize=14, fontweight='bold', y=0.98)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('figures/figure3_sparse_patterns.pdf', bbox_inches='tight')
-    plt.savefig('figures/figure3_sparse_patterns.png', bbox_inches='tight')
-    print("Generated: figures/figure3_sparse_patterns.pdf")
-    plt.close()
+        ax.grid(True, alpha=0.3, color="gray", linewidth=0.5)
+        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
 
-def generate_figure4_ablation_study():
-    """Figure 4: Ablation Study Results
+    fig.suptitle("Sparse Support Pattern Schematics", fontsize=14, fontweight="bold")
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    return _save(fig, "figure3_sparse_pattern_schematic")
 
-    Data source: measured on RTX 3060 / derived from experiments/ablation_results.json
-    """
 
-    results = load_ablation_results()
+def generate_long_context_table():
+    """Print a LaTeX table directly from the diagnostic JSON."""
 
-    if results is not None:
-        # Build from real ablation data
-        config_order = ["full", "no_gate", "no_hierarchical", "standard"]
-        config_labels = ['Full ASAM', 'w/o Adaptive\nGate', 'w/o Hierarchical', 'Standard\nAttention']
-
-        acc_map = {}
-        speed_map = {}
-        for r in results:
-            key = (r["config"], r["task"])
-            acc_map[key] = r["accuracy"]
-            speed_map[key] = r["speed_ms"]
-
-        components = config_labels
-        listops = [acc_map.get((c, "listops"), 0) for c in config_order]
-        text = [acc_map.get((c, "text"), 0) for c in config_order]
-        # Convert speed to relative (normalize to full config)
-        full_speed_listops = speed_map.get(("full", "listops"), 1.0)
-        speed = [speed_map.get((c, "listops"), 1.0) / full_speed_listops for c in config_order]
-    else:
-        # Fallback simulated data
-        components = ['Full ASAM', 'w/o Adaptive\nGate', 'w/o Clustered\nPattern',
-                      'w/o Hierarchical', 'Standard\nAttention']
-
-        listops = [37.2, 35.8, 34.1, 33.5, 36.4]
-        text = [65.1, 63.2, 62.5, 61.8, 64.3]
-        speed = [1.0, 1.1, 1.2, 1.3, 0.25]
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
-    
-    # Left: Accuracy comparison
-    x = np.arange(len(components))
-    width = 0.35
-    
-    bars1 = ax1.bar(x - width/2, listops, width, label='ListOps', 
-                    color='#3498DB', alpha=0.8, edgecolor='black', linewidth=1.2)
-    bars2 = ax1.bar(x + width/2, text, width, label='Text',
-                    color='#E74C3C', alpha=0.8, edgecolor='black', linewidth=1.2)
-    
-    # Highlight full model
-    bars1[0].set_color('#2ECC71')
-    bars2[0].set_color('#2ECC71')
-    bars1[0].set_edgecolor('darkgreen')
-    bars2[0].set_edgecolor('darkgreen')
-    bars1[0].set_linewidth(2)
-    bars2[0].set_linewidth(2)
-    
-    ax1.set_xlabel('Configuration', fontweight='bold')
-    ax1.set_ylabel('Accuracy (%)', fontweight='bold')
-    ax1.set_title('Ablation Study: Task Performance', fontweight='bold', pad=15)
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(components, rotation=15, ha='right')
-    ax1.legend(loc='upper right', frameon=True)
-    ax1.set_ylim(30, 70)
-    ax1.grid(axis='y', alpha=0.3)
-    
-    # Add value labels
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            height = bar.get_height()
-            ax1.annotate(f'{height:.1f}',
-                        xy=(bar.get_x() + bar.get_width() / 2, height),
-                        xytext=(0, 3),
-                        textcoords="offset points",
-                        ha='center', va='bottom', fontsize=8)
-    
-    # Right: Speed comparison
-    colors = ['#2ECC71', '#3498DB', '#9B59B6', '#F39C12', '#E74C3C']
-    bars = ax2.barh(components, speed, color=colors, alpha=0.8, edgecolor='black', linewidth=1.2)
-    
-    ax2.set_xlabel('Relative Speed (×)', fontweight='bold')
-    ax2.set_title('Ablation Study: Inference Speed', fontweight='bold', pad=15)
-    ax2.set_xlim(0, 1.5)
-    ax2.grid(axis='x', alpha=0.3)
-    
-    # Add value labels
-    for i, (bar, val) in enumerate(zip(bars, speed)):
-        width = bar.get_width()
-        ax2.annotate(f'{val:.2f}×',
-                    xy=(width, bar.get_y() + bar.get_height()/2),
-                    xytext=(3, 0),
-                    textcoords="offset points",
-                    ha='left', va='center', fontweight='bold')
-    
-    plt.tight_layout()
-    plt.savefig('figures/figure4_ablation.pdf', bbox_inches='tight')
-    plt.savefig('figures/figure4_ablation.png', bbox_inches='tight')
-    print("Generated: figures/figure4_ablation.pdf")
-    plt.close()
-
-def generate_figure5_gate_visualization():
-    """Figure 5: Adaptive Gate Behavior Visualization"""
-    
-    seq_len = 128
-    np.random.seed(42)
-    
-    # Simulate gate behavior for different input types
-    positions = np.arange(seq_len)
-    
-    # Simple input: mostly sparse
-    gate_simple = 0.8 + 0.15 * np.sin(positions / 10) + np.random.normal(0, 0.05, seq_len)
-    gate_simple = np.clip(gate_simple, 0, 1)
-    
-    # Complex input: mixed
-    gate_complex = 0.5 + 0.3 * np.sin(positions / 8) + np.random.normal(0, 0.1, seq_len)
-    gate_complex = np.clip(gate_complex, 0, 1)
-    
-    # Very complex: mostly dense
-    gate_very_complex = 0.3 + 0.2 * np.sin(positions / 6) + np.random.normal(0, 0.08, seq_len)
-    gate_very_complex = np.clip(gate_very_complex, 0, 1)
-    
-    fig, axes = plt.subplots(3, 1, figsize=(12, 8))
-    
-    inputs = [
-        ('Low Complexity Input', gate_simple, 'Sparse attention preferred'),
-        ('Medium Complexity Input', gate_complex, 'Balanced sparse/dense'),
-        ('High Complexity Input', gate_very_complex, 'Dense attention preferred')
-    ]
-    
-    colors = ['#2ECC71', '#F39C12', '#E74C3C']
-    
-    for ax, (title, gates, desc), color in zip(axes, inputs, colors):
-        ax.fill_between(positions, gates, alpha=0.6, color=color, label='Gate Value')
-        ax.plot(positions, gates, color='darkslategray', linewidth=2)
-        ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Decision Boundary')
-        
-        ax.set_ylabel('Gate Value', fontweight='bold')
-        ax.set_ylim(0, 1)
-        ax.set_xlim(0, seq_len)
-        ax.grid(True, alpha=0.3)
-        
-        # Add text annotation
-        ax.text(0.02, 0.95, title, transform=ax.transAxes, fontsize=11, 
-                fontweight='bold', verticalalignment='top')
-        ax.text(0.02, 0.85, desc, transform=ax.transAxes, fontsize=9,
-                verticalalignment='top', style='italic')
-        
-        # Add mean value
-        mean_gate = gates.mean()
-        ax.text(0.98, 0.95, f'Mean: {mean_gate:.2f}', transform=ax.transAxes,
-                fontsize=10, verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
-    axes[-1].set_xlabel('Sequence Position', fontweight='bold')
-    axes[0].legend(loc='upper right', frameon=True)
-    
-    plt.suptitle('Adaptive Gating Behavior Across Input Complexity', 
-                 fontsize=13, fontweight='bold', y=0.98)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('figures/figure5_gate_behavior.pdf', bbox_inches='tight')
-    plt.savefig('figures/figure5_gate_behavior.png', bbox_inches='tight')
-    print("Generated: figures/figure5_gate_behavior.pdf")
-    plt.close()
-
-def generate_table_data():
-    """Generate LaTeX table data"""
-
-    results = load_lra_results()
-    ablation_data = load_ablation_results()
-
-    print("\n" + "="*60)
-    print("LaTeX Table Data")
-    print("="*60)
-
-    # Table 1: LRA Results
-    print("\n% Table 1: LRA Results")
+    data = load_long_context_diagnostic()
+    print("\n% Long-context diagnostic table")
     print("\\begin{table}[htbp]")
     print("\\centering")
-    print("\\caption{Long Range Arena Results}")
-    print("\\begin{tabular}{lccccc|c}")
+    print("\\caption{LRA-style synthetic diagnostic; not official LRA.}")
+    print("\\begin{tabular}{lrrr}")
     print("\\toprule")
-    print("Model & ListOps & Text & Retrieval & Image & Pathfinder & Avg \\\\")
+    print("Model & Sequence length & Latency (ms) & Finite output \\\\")
     print("\\midrule")
 
-    if results is not None:
-        # Build from real data
-        models_order = ["transformer", "local", "asam"]
-        tasks_order = ["listops", "text", "retrieval", "image", "pathfinder"]
-        acc_map = {}
-        for r in results:
-            acc_map[(r["model"], r["task"])] = r["accuracy"]
-
-        model_labels = {"transformer": "Transformer", "local": "Local Attn", "asam": "\\textbf{ASAM}"}
-        for model in models_order:
-            vals = [acc_map.get((model, t), 0) for t in tasks_order]
-            avg = sum(vals) / len(vals)
-            print(f"{model_labels[model]} & " + " & ".join([f"{v:.1f}" for v in vals]) + f" & {avg:.1f} \\\\")
+    if data is None:
+        print("\\multicolumn{4}{c}{No audited diagnostic artifact available} \\\\")
     else:
-        print("\\multicolumn{7}{c}{No manifest-audited LRA values available} \\\\")
+        rows = _successful_rows(data)
+        for row in sorted(rows, key=lambda item: (item["model"], item["sequence_length"])):
+            print(
+                f"{row['model']} & {row['sequence_length']} & "
+                f"{row['latency_ms_mean']:.4f} & {row['finite_output_rate']:.3f} \\\\"
+            )
 
     print("\\bottomrule")
     print("\\end{tabular}")
     print("\\end{table}")
 
-    # Table 2: Ablation Results (if available)
-    print("\n% Table 2: Ablation Results")
-    print("\\begin{table}[htbp]")
-    print("\\centering")
-    print("\\caption{Ablation Study Results}")
-    print("\\begin{tabular}{lcc}")
-    print("\\toprule")
-    print("Configuration & ListOps & Text \\\\")
-    print("\\midrule")
-
-    config_labels = {"full": "Full ASAM", "no_gate": "w/o Gate",
-                     "no_hierarchical": "w/o Hierarchical", "standard": "Standard Attn"}
-
-    if ablation_data is not None:
-        config_order = ["full", "no_gate", "no_hierarchical", "standard"]
-        for c in config_order:
-            listops_val = next((r["accuracy"] for r in ablation_data
-                               if r["config"] == c and r["task"] == "listops"), "---")
-            text_val = next((r["accuracy"] for r in ablation_data
-                            if r["config"] == c and r["task"] == "text"), "---")
-            label = config_labels.get(c, c)
-            print(f"{label} & {listops_val} & {text_val} \\\\")
-    else:
-        print("\\multicolumn{3}{c}{No manifest-audited ablation values available} \\\\")
-
-    print("\\bottomrule")
-    print("\\end{tabular}")
-    print("\\end{table}")
 
 def main():
-    """Generate all figures"""
-    print("="*60)
-    print("ASAM Paper Figure Generation")
-    print("="*60)
+    """Generate figures and tables from audited artifacts."""
+
+    print("=" * 60)
+    print("ASAM Paper Artifact-Backed Figure Generation")
+    print("=" * 60)
+
+    generated = []
+    generated.extend(generate_long_context_latency_figure())
+    generated.extend(generate_long_context_quality_figure())
+    generated.extend(generate_sparse_pattern_schematic())
+    generate_long_context_table()
+
     print()
-    
-    generate_figure1_lra_results()
-    generate_figure2_efficiency_comparison()
-    generate_figure3_sparse_patterns()
-    generate_figure4_ablation_study()
-    generate_figure5_gate_visualization()
-    generate_table_data()
-    
-    print()
-    print("="*60)
-    print("All figures generated successfully!")
-    print("="*60)
-    print("\nGenerated files:")
-    for f in os.listdir('figures'):
-        print(f"  - figures/{f}")
+    print("=" * 60)
+    print(f"Generated {len(generated)} artifact-backed or schematic files.")
+    print("=" * 60)
+    for path in generated:
+        print(f"  - {path}")
+
 
 if __name__ == "__main__":
     main()
