@@ -1,0 +1,63 @@
+% BEGIN AUTO-GENERATED CONTINUAL APPENDIX
+\appendix
+\section{Continual ASAM Pilot Study}
+\label{app:continual_asam}
+
+To assess whether the adaptive sparse-routing ideas behind ASAM can be extended to continual learning, we implemented a pilot continual-learning variant in the repository. This appendix intentionally presents the continual results as a conservative addendum rather than a replacement for the main long-sequence claims of the paper. The goal is to document the current executable continual-learning evidence, including both positive diagnostic signals and negative comparative findings.
+
+\subsection{Setup}
+
+We evaluate the continual extension on class-incremental Split AG News with 2 tasks of 2 classes each and a compact text classifier built from continual ASAM layers. The current paper-oriented run uses sequence length $64$, batch size $4$, $16$ training examples and $8$ validation examples per split, 1 layer with model width $32$, 2 heads, top-$k=2$ sparse pattern selection, AdamW with learning rate $3 \times 10^{-4}$, and 1 training epoch per task. Strategy-level and operator-level ablations are aggregated over 1 seed. This setting is deliberately modest and CPU-runnable, so it should be interpreted as a controlled pilot benchmark rather than a final large-scale continual-learning claim.
+
+\subsection{Diagnostic Benchmark}
+
+The single-run prototype-routing benchmark with the meta-secant controller reaches average accuracy 0.5000, average forgetting 0.2500, and backward transfer -0.2500. Because this benchmark is single-seed, we use it primarily as a diagnostic case study: it is useful for inspecting stage-wise transport loss, routing stability, entropy, and prototype occupancy, but it should not be treated as the main comparative result.
+
+\subsection{Strategy-Level Ablation}
+
+Table~\ref{tab:continual_strategy_ablation} summarizes the current single-seed routing/controller comparison. The strongest strategy in the present setup is still the explicit task-conditioned baseline, not a prototype-routed variant. This is an important negative result: the current continual ASAM implementation is measurable and executable, but it does not yet improve over task-ID routing on retention at this scale.
+
+\begin{table}[htbp]
+\centering
+\caption{Strategy-level continual ablation on Split AG News (1 seed). Higher accuracy and backward transfer are better; lower forgetting is better.}
+\label{tab:continual_strategy_ablation}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Strategy} & \textbf{Avg Acc.} & \textbf{Avg Forgetting} & \textbf{BWT} & \textbf{Final Gap} \\
+\midrule
+\texttt{task\_routing} & $0.6250 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+\texttt{no\_adaptation} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ \\
+\texttt{correlation} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0240 \pm 0.0000$ \\
+\texttt{dual\_transport} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ \\
+\texttt{meta\_secant} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0240 \pm 0.0000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Operator-Level Ablation}
+
+Table~\ref{tab:continual_operator_ablation} isolates several operator choices inside prototype-routed continual ASAM. In this single-seed smoke run, operator variants have identical accuracy; only transport-facing traces differ. \texttt{sinkhorn\_topk} records a final transport gap of 0.0236, while \texttt{kl\_topk} records 0.0149. \texttt{no\_transport} reports average accuracy 0.5000 and final transport loss 0.0704. We therefore interpret the present operator study as an early mechanistic signal rather than a decisive empirical win.
+
+\begin{table}[htbp]
+\centering
+\caption{Operator-level continual ablation on Split AG News (1 seed).}
+\label{tab:continual_operator_ablation}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Operator Setting} & \textbf{Routing} & \textbf{Avg Acc.} & \textbf{Avg Forgetting} & \textbf{Final Gap} & \textbf{Final Transport} \\
+\midrule
+\texttt{sinkhorn\_topk} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ & $0.0740 \pm 0.0000$ \\
+\texttt{kl\_topk} & KL Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0149 \pm 0.0000$ & $0.0503 \pm 0.0000$ \\
+\texttt{masked\_sinkhorn\_topk} & Masked Sinkhorn Topk & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0000 \pm 0.0000$ & $0.0606 \pm 0.0000$ \\
+\texttt{sinkhorn\_support\_masked} & Sinkhorn Support Masked & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0000 \pm 0.0000$ & $0.0740 \pm 0.0000$ \\
+\texttt{no\_transport} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ & $0.0704 \pm 0.0000$ \\
+\texttt{no\_merge} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0174 \pm 0.0000$ & $0.0912 \pm 0.0000$ \\
+\texttt{no\_relocation} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ & $0.0674 \pm 0.0000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Takeaway}
+
+The current continual-learning results support a narrow but honest conclusion. The continual ASAM framework already provides executable transport-aware diagnostics, prototype lifecycle statistics, and operator-level ablations. However, under the present small-scale CPU configuration, these mechanisms do not yet translate into a retention advantage over an explicit task-conditioned baseline. The most defensible claim at this stage is therefore a framework-level one: continual sparse routing is measurable and partly interpretable, but stronger data scale, longer training, and richer ablations are still needed before claiming a clear empirical advantage.
+% END AUTO-GENERATED CONTINUAL APPENDIX

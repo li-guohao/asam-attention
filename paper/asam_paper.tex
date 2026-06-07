@@ -28,15 +28,10 @@
 }
 
 % Title
-\title{\textbf{ASAM: Adaptive Sparse Attention Mechanism\\for Efficient Long Sequence Modeling}}
+\title{\textbf{ASAM: Unified Adaptive Sparse Routing\\for Efficient Long-Context and Continual Learning}}
 
 % Author
-\author{
-    Guohao Li\\
-    \texttt{guohaoli2000@gmail.com}\\
-    \And
-    \\ % Anonymous for arXiv
-}
+\author{Anonymous Authors}
 
 \date{\today}
 
@@ -46,41 +41,42 @@
 
 % Abstract
 \begin{abstract}
-Self-attention mechanisms in Transformers suffer from quadratic complexity with respect to sequence length, limiting their applicability to long sequences. While various sparse attention methods have been proposed, they often rely on fixed patterns or post-hoc selection, lacking adaptability during training. We propose \textbf{ASAM} (Adaptive Sparse Attention Mechanism), a novel attention architecture that dynamically adjusts between sparse and dense attention based on input complexity. ASAM introduces (1) \textit{differentiable adaptive gating} that learns to switch between attention modes, (2) \textit{hierarchical multi-scale sparse patterns} combining local, strided, and global attention, and (3) \textit{learnable clustered sparsity} with trainable centroids for semantic grouping. Our method achieves \textbf{50.9\%} average accuracy on the Long Range Arena (LRA) benchmark, outperforming Longformer (49.4\%), Performer (44.8\%), and Linformer (45.1\%). ASAM also demonstrates 2-8$\times$ speedup and 4$\times$ memory reduction compared to standard attention on sequences up to 16K tokens. Comprehensive robustness tests confirm its stability across gradient flow, numerical precision, and adversarial perturbations. Code and benchmarks are available at \url{https://github.com/li-guohao/asam-attention}.
+Sparse attention is usually motivated as a long-context efficiency technique, while continual learning is usually discussed through memory, replay, or task routing. We revisit both settings through a single object: an adaptive sparse routing operator that chooses a small support set, applies a capacity-aware assignment, and exposes the resulting routing geometry for audit. ASAM instantiates this view with differentiable sparse attention supports for long sequences and prototype-conditioned sparse routing for continual text classification. The current draft makes three deliberately conservative contributions: (i) a unified operator formulation that separates support selection, transport-style capacity projection, and sparse value aggregation; (ii) a mathematical account of when this operator reduces long-context work and when its prototype geometry yields interpretable continual-learning diagnostics; and (iii) an artifact-audited experimental protocol that separates artifact-backed benchmark evidence from LRA-style synthetic diagnostics and low-budget continual smoke tests. At this stage we do not claim official LRA leadership or a retention advantage over explicit task-ID routing. Instead, the paper reports the executable evidence currently available and uses negative results to define the next experimental gates.
 \end{abstract}
 
 % Keywords
-\textbf{Keywords:} Sparse Attention, Efficient Transformers, Long Sequence Modeling, Adaptive Computation
+\textbf{Keywords:} Sparse Attention, Adaptive Routing, Long-Context Modeling, Continual Learning, Artifact Auditing
 
-% Introduction
-\section{Introduction}
-\label{sec:introduction}
+% Motivation
+\section{Motivation}
+\label{sec:motivation}
 
 Transformer architectures have revolutionized natural language processing, computer vision, and multimodal learning \citep{vaswani2017attention}. The core self-attention mechanism enables global information exchange but incurs $\mathcal{O}(n^2)$ time and memory complexity with respect to sequence length $n$. This quadratic bottleneck becomes prohibitive for long sequences exceeding a few thousand tokens.
 
 Numerous approaches have been proposed to address this limitation. Sparse attention methods reduce complexity by limiting attention to specific patterns such as local windows \citep{beltagy2020longformer}, strided patterns \citep{child2019generating}, or random sampling \citep{zaheer2020big}. Kernel-based methods approximate attention using low-rank decompositions \citep{wang2020linformer} or random feature maps \citep{choromanski2020rethinking}. Memory-efficient implementations like Flash Attention \citep{dao2022flashattention} optimize I/O operations but maintain quadratic computation.
 
-However, existing methods face three key limitations:
+The same design pressure appears in continual learning. If every task uses the same dense representation, the model has no explicit mechanism for isolating, reusing, or auditing task-specific subspaces. If every task uses a manually supplied task identifier, the routing is strong but not autonomous. ASAM therefore treats sparse attention and continual task routing as two instances of one problem: learn a constrained routing distribution, expose its support, and regularize its geometry.
+
+The central question is not whether sparsity alone is novel. Fixed windows, routing attention, kernel approximations, and post-hoc token selection are well established. The question is whether a single adaptive sparse routing operator can give two defensible benefits at once:
 \begin{enumerate}
-    \item \textbf{Fixed Patterns:} Methods like Longformer and BigBird use predefined sparsity patterns that cannot adapt to input characteristics.
-    \item \textbf{Post-hoc Selection:} Recent inference optimization methods (e.g., H2O, StreamingLLM) select tokens after attention computation, making them non-differentiable and unsuitable for training.
-    \item \textbf{Lack of Hierarchy:} Most sparse patterns operate at a single scale, missing multi-granular dependencies.
+    \item \textbf{Long-context efficiency:} restrict each query to $k \ll n$ keys while preserving exact softmax attention on the selected support.
+    \item \textbf{Continual routing geometry:} route examples through a small prototype support whose occupancy, capacity gap, and lifecycle transitions can be measured.
+    \item \textbf{Auditability:} make every paper-facing number traceable to a manifest and dataset-provenance record.
 \end{enumerate}
 
-To address these limitations, we propose \textbf{ASAM} (Adaptive Sparse Attention Mechanism), a novel attention architecture with the following contributions:
+This draft positions ASAM as an early but executable framework rather than a completed empirical victory. Historical LRA-like plots in the repository are treated as synthetic diagnostics until official dataset provenance is attached. Current continual results are low-budget and include negative findings. This choice is intentional: the contribution should survive adversarial review even when the strongest baseline remains competitive.
+
+Our contributions are:
 
 \begin{itemize}
-    \item \textbf{Differentiable Adaptive Gating:} A learnable mechanism that dynamically switches between sparse and dense attention based on input complexity estimation and confidence prediction. Unlike post-hoc methods, ASAM's gating is end-to-end differentiable, enabling joint optimization during training.
-    
-    \item \textbf{Hierarchical Multi-Scale Patterns:} A composable sparse pattern system combining local (sliding window), strided (periodic), and global attention with learnable combination weights. This allows the model to capture dependencies at multiple granularities.
-    
-    \item \textbf{Learnable Clustered Sparsity:} Dynamic clustering with trainable centroids that group semantically similar tokens, enabling data-driven pattern selection rather than fixed heuristics.
-    
-    \item \textbf{Comprehensive Evaluation:} We benchmark ASAM on the Long Range Arena (LRA) across five tasks and compare against six baseline methods. ASAM achieves state-of-the-art results (50.9\% average accuracy) while maintaining 2-8$\times$ speedup.
+    \item We formulate ASAM as \textbf{adaptive sparse routing}: support selection followed by optional transport-style capacity projection and sparse aggregation.
+    \item We show how the same operator specializes to long-context attention and to prototype-routed continual learning.
+    \item We define artifact gates that prevent synthetic diagnostics, outdated manifests, or fallback data from being reported as official benchmark evidence.
+    \item We report current audited evidence honestly, including a continual-learning smoke run where task-ID routing remains stronger than autonomous prototype routing.
 \end{itemize}
 
 % Related Work
-\section{Related Work}
+\section{Related Work and Positioning}
 \label{sec:related}
 
 \subsection{Sparse Attention Patterns}
@@ -105,302 +101,163 @@ Flash Attention \citep{dao2022flashattention} reduces memory usage through tilin
 
 \subsection{Positioning of ASAM}
 
-ASAM occupies a unique position in the landscape:
+ASAM is positioned as a unifying operator rather than as a replacement for every sparse-attention family:
 \begin{itemize}
-    \item Unlike fixed-pattern methods, ASAM \textit{learns} sparsity patterns from data.
-    \item Unlike post-hoc selection methods, ASAM is \textit{differentiable} and trainable end-to-end.
-    \item Unlike kernel approximations, ASAM maintains \textit{exact} attention for selected patterns.
-    \item Unlike single-scale methods, ASAM uses \textit{hierarchical} multi-scale patterns.
+    \item Fixed local or strided masks are valid ASAM supports, but learned scores can also choose supports from data.
+    \item Post-hoc inference selection is complementary; ASAM focuses on training-time routing components where gradients flow through selected or relaxed routes.
+    \item Kernel approximations compress the dense operator; ASAM keeps exact softmax attention on a selected support.
+    \item Task-ID continual routing is a strong baseline; ASAM adds autonomous prototype occupancy and transport-gap diagnostics.
 \end{itemize}
 
-% Methodology
-\section{Methodology}
+% Unified sparse routing
+\section{Unified Sparse Routing}
 \label{sec:method}
 
-\subsection{Problem Formulation}
+\subsection{Operator Formulation}
 
-Given input $\mathbf{X} \in \mathbb{R}^{n \times d}$ where $n$ is sequence length and $d$ is model dimension, standard self-attention computes:
+Let $\mathbf{X}\in\mathbb{R}^{n\times d}$ be a sequence or minibatch representation and let $\mathcal{U}$ denote a finite routing universe. For long-context attention, $\mathcal{U}$ is the set of key positions. For continual learning, $\mathcal{U}$ is the set of task or prototype slots. ASAM constructs a sparse routing operator in three steps.
+
+\paragraph{Support scoring.}
+Scores $S_\theta(\mathbf{X})\in\mathbb{R}^{n\times |\mathcal{U}|}$ are produced by a pattern scorer, prototype scorer, or hybrid of fixed and learned features. A support map
+\begin{equation}
+M_{iu}=\mathbb{1}\{u\in \mathrm{TopK}(S_{i:})\}
+\end{equation}
+keeps at most $k$ routes per item. Fixed local, strided, or random masks can be included by adding their support before or after top-$k$ selection.
+
+\paragraph{Capacity projection.}
+When route balance matters, the masked scores are projected toward a capacity vector $c$ with an entropy-regularized transport map:
+\begin{equation}
+R^\star = \arg\min_{R\ge 0}\ \langle R,-S\rangle + \varepsilon \sum_{i,u}R_{iu}(\log R_{iu}-1)
+\quad \mathrm{s.t.}\quad
+R\mathbf{1}=\mathbf{1},\ R^\top\mathbf{1}=c,\ R_{iu}=0\ \mathrm{if}\ M_{iu}=0 .
+\label{eq:masked_ot}
+\end{equation}
+In practice this is approximated with masked Sinkhorn iterations or relaxed with a KL top-$k$ operator. If capacity is not needed, $R$ is simply the row-normalized masked softmax. The support constraint is important: a transport projection that ignores $M$ can reintroduce infeasible routes.
+
+\paragraph{Sparse aggregation.}
+Given values $V_u$, ASAM returns
+\begin{equation}
+\mathrm{ASAM}(\mathbf{X})_i=\sum_{u\in\mathcal{U}}R_{iu}V_u,
+\quad \mathrm{supp}(R_{i:})\subseteq \{u:M_{iu}=1\}.
+\end{equation}
+This definition separates what is selected, how route mass is balanced, and how selected values are aggregated. It is the main abstraction used by both paper threads.
+
+\subsection{Differentiability and Sparsity}
+
+Hard support selection is piecewise constant. ASAM therefore uses it as an operator choice rather than pretending it is globally smooth. Gradients flow through the selected sparse softmax or through the relaxed transport map; support changes are handled by the scoring network across minibatches. For settings that require fully differentiable support discovery, the hard top-$k$ can be replaced by a temperature-controlled relaxation, but this draft treats that as an ablation rather than a universal assumption.
+
+\paragraph{Complexity.}
+If each row has at most $k$ active routes and values have width $d_v$, sparse aggregation costs $\mathcal{O}(nkd_v)$ after score construction. For attention, local and indexed supports avoid materializing an $n\times n$ score matrix. For learned global scores, the score-construction cost must also be counted; the paper therefore separates \emph{operator sparsity} from \emph{end-to-end runtime}.
+
+\section{Long-Context Efficiency}
+\label{sec:long_context}
+
+Given queries, keys, and values $\mathbf{Q},\mathbf{K},\mathbf{V}$, dense attention computes:
 
 \begin{equation}
-\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V}
+\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) =
+\text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V}.
 \end{equation}
 
-where $\mathbf{Q}, \mathbf{K}, \mathbf{V} \in \mathbb{R}^{n \times d_k}$ are query, key, and value projections. This requires $\mathcal{O}(n^2)$ time and memory.
-
-We aim to approximate full attention with adaptive sparse attention:
+ASAM replaces the dense key universe for each query $i$ with a selected support $\mathcal{S}(i)$. The sparse attention row is
 
 \begin{equation}
-\text{ASAM}(\mathbf{X}) = g(\mathbf{X}) \cdot \text{SparseAttn}(\mathbf{X}) + (1 - g(\mathbf{X})) \cdot \text{DenseAttn}(\mathbf{X})
+\text{SparseAttn}(\mathbf{Q}, \mathbf{K}, \mathbf{V})_i
+= \sum_{j \in \mathcal{S}(i)}
+\mathrm{softmax}_{j\in \mathcal{S}(i)}
+\left(\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d_k}}\right)\mathbf{v}_j .
 \end{equation}
 
-where $g(\mathbf{X}) \in [0, 1]$ is a learnable gating function that balances between sparse (efficient) and dense (expressive) attention.
+The implemented support families include local windows, strided links, random links, clustered links, and hierarchical unions. A gate can mix a sparse path with a dense or SDPA path, but any claimed subquadratic runtime must refer to the true sparse path rather than a masked dense matrix multiplication.
 
-\subsection{Adaptive Gating Mechanism}
+\paragraph{Efficiency claim boundary.}
+For a maximum support size $k$, the ideal sparse attention arithmetic is $\mathcal{O}(nkd_k)$ and the attention-state memory is $\mathcal{O}(nk)$, compared with $\mathcal{O}(n^2d_k)$ and $\mathcal{O}(n^2)$ for dense attention. This is a mathematical operator bound, not a hardware speedup claim. Hardware speedups require measured kernels, sequence-length sweeps, and memory traces. The current draft therefore treats repository microbenchmarks as diagnostics until their manifests are upgraded to the paper-facing provenance standard.
 
-The core innovation of ASAM is its \textbf{differentiable adaptive gate} that determines when sparse attention suffices.
+\section{Continual Routing Geometry}
+\label{sec:continual_geometry}
 
-\paragraph{Multi-Scale Feature Extraction.}
-We extract features at multiple scales using adaptive pooling:
+In continual learning, $\mathcal{U}$ is a bank of prototype slots. Each example is routed to a sparse set of prototypes, and each prototype stores occupancy and task-conditioned statistics. The same masked transport operator in Eq.~\ref{eq:masked_ot} can be used to keep assignments near a target capacity while respecting the current feasible support.
+
+\paragraph{Prototype stability.}
+Let $R_t$ be the routing matrix at task stage $t$ and $P_t$ the prototype matrix. The current implementation exposes diagnostics such as
+\begin{equation}
+\Delta_{\mathrm{cap}}(t)=\left\|R_t^\top\mathbf{1}-c_t\right\|_1,
+\quad
+\Delta_{\mathrm{proto}}(t)=\min_{\Pi\in\mathcal{B}}\|P_t-\Pi P_{t-1}\|_F,
+\end{equation}
+where $\mathcal{B}$ is the Birkhoff polytope of doubly stochastic prototype matchings. These are not performance guarantees. They are geometry measurements that let us inspect whether a routing operator preserves capacity, reuses prototypes, or collapses to a small subset of slots.
+
+\paragraph{Mathematical benefit.}
+The transport term gives a controlled way to penalize route collapse. If $R$ is feasible for Eq.~\ref{eq:masked_ot}, then $R^\top\mathbf{1}=c$ by construction; with finite Sinkhorn iterations the observed capacity gap becomes a measurable approximation error. In a continual setting this matters because prototype occupancy is part of the model state. Balanced occupancy alone cannot prevent forgetting, but it creates an auditable route-allocation invariant that task-ID baselines do not expose.
+
+\paragraph{Training objective.}
+The continual variant uses a task loss plus regularizers for stability, overlap, diversity, balance, and transport:
 
 \begin{equation}
-\mathbf{f}_i = \text{Pool}_i(\mathbf{X}), \quad i \in \{1, 2, ..., m\}
+\mathcal{L}=\mathcal{L}_{\mathrm{task}}
++\lambda_s\mathcal{L}_{\mathrm{stability}}
++\lambda_o\mathcal{L}_{\mathrm{overlap}}
++\lambda_b\mathcal{L}_{\mathrm{balance}}
++\lambda_d\mathcal{L}_{\mathrm{diversity}}
++\lambda_t\mathcal{L}_{\mathrm{transport}}.
 \end{equation}
 
-where $\text{Pool}_i$ represents pooling at scale $i$. These features are concatenated and projected to a hidden representation.
+The current experiments should be read as operator diagnostics for these terms, not as proof that the full objective already dominates replay or task-conditioned baselines.
 
-\paragraph{Complexity Estimation.}
-We estimate input complexity using an MLP:
-
-\begin{equation}
-\mathbf{c} = \text{MLP}_{\text{complexity}}(\mathbf{f})
-\end{equation}
-
-where $\mathbf{c} \in \mathbb{R}^{h}$ represents complexity per attention head.
-
-\paragraph{Confidence Prediction.}
-We predict confidence in sparse attention sufficiency:
-
-\begin{equation}
-\mathbf{p} = \sigma(\text{MLP}_{\text{confidence}}(\mathbf{f}))
-\end{equation}
-
-where $\mathbf{p} \in (0, 1)^h$ and $\sigma$ is the sigmoid function.
-
-\paragraph{Gate Computation.}
-The final gate combines complexity and confidence with a learnable threshold:
-
-\begin{equation}
-g = \sigma\left(\frac{\tau - \mathbf{c}}{T} \cdot \mathbf{p}\right)
-\end{equation}
-
-where $\tau$ is a learnable threshold and $T$ is a temperature parameter. Lower complexity and higher confidence yield stronger sparse attention (higher $g$).
-
-\subsection{Hierarchical Multi-Scale Patterns}
-
-ASAM implements a composable sparse pattern system operating at multiple scales:
-
-\paragraph{Local Pattern.}
-Each position attends only to its local neighborhood:
-
-\begin{equation}
-\mathcal{S}_{\text{local}}(i) = \{j : |i - j| \leq w/2\}
-\end{equation}
-
-where $w$ is the window size. Complexity: $\mathcal{O}(n \cdot w)$.
-
-\paragraph{Strided Pattern.}
-Each position attends to periodically spaced positions:
-
-\begin{equation}
-\mathcal{S}_{\text{strided}}(i) = \{j : j \equiv i \pmod{s}\}
-\end{equation}
-
-where $s$ is the stride. Complexity: $\mathcal{O}(n \cdot n/s)$.
-
-\paragraph{Clustered Pattern.}
-We learn $k$ cluster centroids $\mathbf{C} \in \mathbb{R}^{k \times d}$ and assign tokens via soft attention:
-
-\begin{align}
-\boldsymbol{\alpha}_i &= \text{softmax}(\mathbf{q}_i \mathbf{C}^T / \tau) \\
-\mathcal{S}_{\text{cluster}}(i) &= \{j : \boldsymbol{\alpha}_i^T \boldsymbol{\alpha}_j > \theta\}
-\end{align}
-
-Tokens attend only to others in similar clusters. Complexity: $\mathcal{O}(n \cdot k)$.
-
-\paragraph{Hierarchical Combination.}
-The final sparse pattern combines all scales with learnable weights:
-
-\begin{equation}
-\mathcal{S}_{\text{hierarchical}} = \bigcup_{s \in \mathcal{S}} w_s \cdot \mathcal{S}_s
-\end{equation}
-
-where $\mathcal{S} = \{\text{local}, \text{strided}, \text{clustered}\}$ and $w_s$ are learned combination weights.
-
-\subsection{Sparse Attention Computation}
-
-Given sparse pattern $\mathcal{S}$, we compute attention only over allowed positions:
-
-\begin{equation}
-\text{SparseAttn}(\mathbf{Q}, \mathbf{K}, \mathbf{V})_i = \sum_{j \in \mathcal{S}(i)} \text{softmax}\left(\frac{\mathbf{q}_i \mathbf{k}_j^T}{\sqrt{d_k}}\right) \mathbf{v}_j
-\end{equation}
-
-This reduces computation from $\mathcal{O}(n^2 d_k)$ to $\mathcal{O}(|\mathcal{S}| d_k)$ where $|\mathcal{S}| \ll n^2$ for sparse patterns.
-
-\subsection{Training Objective}
-
-ASAM is trained end-to-end with standard cross-entropy loss. The gating mechanism is fully differentiable, allowing gradients to flow through both sparse and dense paths:
-
-\begin{equation}
-\mathcal{L} = \mathcal{L}_{\text{task}} + \lambda \mathcal{L}_{\text{gate\_regularization}}
-\end{equation}
-
-where $\mathcal{L}_{\text{gate\_regularization}}$ encourages sparsity when possible:
-
-\begin{equation}
-\mathcal{L}_{\text{gate\_regularization}} = \frac{1}{n} \sum_{i=1}^n (g_i - \gamma)^2
-\end{equation}
-
-with $\gamma$ as a target sparsity ratio.
-
-% Experiments
 \section{Experiments}
 \label{sec:experiments}
 
-\subsection{Long Range Arena (LRA)}
+\subsection{Claim Scope and Provenance}
 
-We evaluate ASAM on the Long Range Arena benchmark \citep{tay2020long}, a comprehensive testbed for efficient transformers consisting of five tasks:
+We separate three evidence levels:
 
+\begin{table}[htbp]
+\centering
+\caption{Current evidence status. Only rows with current provenance are paper-facing in this draft.}
+\label{tab:evidence_status}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Evidence} & \textbf{Status} & \textbf{Claim allowed} \\
+\midrule
+LRA-style synthetic diagnostics & Not official LRA & Diagnostic only \\
+Long-context runtime sweep & Pending manifest & No speedup claim yet \\
+Continual canonical smoke & Current manifest & Pipeline and operator audit \\
+Historical continual suites & Outdated manifest & Not paper-facing \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Long-Context Diagnostics}
+
+The long-context section is intentionally scoped as a diagnostic plan until new paper-facing artifacts are generated. The required suite compares ASAM, dense Transformer attention, local attention, and Longformer-style local/global attention across at least three sequence lengths. Reported metrics must include wall-clock time, peak memory, and task accuracy or diagnostic score. Existing LRA-like repository figures are not reported as official LRA because their current provenance does not meet the paper-facing audit gate.
+
+\subsection{Continual Operator Ablation}
+
+The current auditable continual artifact is the canonical CPU smoke suite in \texttt{experiments/paper\_suite\_canonical\_smoke}. It uses Hugging Face AG News provenance for both train and validation splits and records command-line arguments, git commit, dirty state, Python/PyTorch versions, timestamps, and SHA-256 hashes for generated outputs. The audit rates this suite as \texttt{CURRENT} with zero blocking issues and one non-blocking duplicate-output warning due to intentionally tiny one-seed smoke settings.
+
+Appendix~\ref{app:continual_asam} contains the smoke numbers generated from this artifact. They should be interpreted as pipeline validation and operator-level sanity checks, not as final continual-learning evidence. The main negative result is already visible: explicit task routing remains stronger than autonomous prototype routing in the current tiny configuration.
+
+\subsection{Planned Paper-Facing Gates}
+
+Before submission, the paper needs the following artifact-backed tables generated from JSON or CSV, not hand-copied numbers:
 \begin{itemize}
-    \item \textbf{ListOps}: Hierarchical structure reasoning (2K tokens)
-    \item \textbf{Text}: Document classification (4K tokens)
-    \item \textbf{Retrieval}: Document retrieval with dual encoder (4K tokens)
-    \item \textbf{Image}: Sequential CIFAR-10 classification (1K tokens)
-    \item \textbf{Pathfinder}: Long-range spatial dependency detection (1K tokens)
+    \item long-context runtime/accuracy sweeps over at least three sequence lengths;
+    \item continual Split AG News, DBPedia, and ArXiv-style suites with at least three seeds each;
+    \item operator ablations for \texttt{sinkhorn\_topk}, \texttt{kl\_topk}, \texttt{sinkhorn\_support\_masked}, \texttt{no\_transport}, \texttt{no\_merge}, and \texttt{no\_relocation};
+    \item artifact-audit summaries proving manifest and dataset-provenance consistency.
 \end{itemize}
 
-\subsection{Baselines}
+\section{Limitations}
+\label{sec:limitations}
 
-We compare against six methods:
-\begin{enumerate}
-    \item Standard Transformer (full attention)
-    \item Local Attention (sliding window)
-    \item Sparse Transformer (strided pattern)
-    \item Longformer (local + global)
-    \item Linformer (low-rank approximation)
-    \item Performer (FAVOR+ kernel)
-\end{enumerate}
+The current ASAM evidence is incomplete. First, the long-context efficiency result is currently an operator argument plus repository diagnostics, not yet a paper-facing speedup table. Second, the continual-learning evidence in the main branch is a small smoke run; stronger historical suites exist but fail the current strict provenance gate and are therefore not used for claims. Third, masked top-$k$ routing creates a support-discontinuity issue: gradients are reliable inside the selected support, but support changes are not globally smooth unless a relaxed top-$k$ estimator is used. Fourth, capacity-balanced routing can improve interpretability while still failing to improve task retention, as the current negative smoke result shows.
 
-All models use comparable parameter counts ($\sim$10M) and are trained with identical hyperparameters.
+These limitations determine the next experimental priorities. If future runs show no advantage over task-ID routing or standard sparse baselines, ASAM should be framed as an auditable unified routing framework with negative early results, not as a performance-leading architecture.
 
-\subsection{Results}
-
-Figure~\ref{fig:lra_results} shows the performance comparison across all LRA tasks. ASAM achieves the highest accuracy on four out of five tasks and the best overall average.
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{figures/figure1_lra_results.pdf}
-    \caption{Long Range Arena benchmark results. ASAM achieves 50.9\% average accuracy, outperforming all baseline methods.}
-    \label{fig:lra_results}
-\end{figure}
-
-\begin{table}[htbp]
-\centering
-\caption{Long Range Arena Results. Higher is better. Best results in \textbf{bold}.}
-\label{tab:lra}
-\begin{tabular}{@{}lccccc|c@{}}
-\toprule
-\textbf{Model} & \textbf{ListOps} & \textbf{Text} & \textbf{Retrieval} & \textbf{Image} & \textbf{Pathfinder} & \textbf{Avg} \\
-\midrule
-Transformer & 36.4 & 64.3 & 57.5 & 42.2 & 71.8 & 50.1 \\
-Local Attention & 15.8 & 52.9 & 53.4 & 41.5 & 69.4 & 40.9 \\
-Sparse Transformer & 17.1 & 63.6 & 59.6 & 44.2 & 71.5 & 46.1 \\
-Longformer & 35.7 & 62.8 & 56.9 & 42.2 & 69.4 & 49.4 \\
-Linformer & 35.7 & 53.9 & 52.3 & 38.6 & 76.3 & 45.1 \\
-Performer & 18.0 & 65.4 & 53.1 & 42.8 & 77.1 & 44.8 \\
-\midrule
-\textbf{ASAM (Ours)} & \textbf{37.2} & \textbf{65.1} & \textbf{58.3} & \textbf{43.1} & \textbf{74.2} & \textbf{50.9} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{ASAM achieves state-of-the-art results} with 50.9\% average accuracy, outperforming all baselines. Notably, ASAM achieves the best or second-best performance on every individual task, demonstrating consistent effectiveness across diverse task types.
-
-\subsection{Efficiency Analysis}
-
-Figure~\ref{fig:efficiency} demonstrates the speed and memory advantages of ASAM compared to standard attention and other efficient methods.
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{figures/figure2_efficiency.pdf}
-    \caption{Speed and memory comparison. ASAM achieves 2-8$\times$ speedup and 4$\times$ memory reduction.}
-    \label{fig:efficiency}
-\end{figure}
-
-\begin{table}[htbp]
-\centering
-\caption{Speed and Memory Comparison on NVIDIA A100 GPU}
-\label{tab:efficiency}
-\begin{tabular}{@{}ccccc@{}}
-\toprule
-\textbf{Seq Len} & \textbf{Standard} & \textbf{ASAM} & \textbf{Speedup} & \textbf{Memory Saving} \\
-\midrule
-512 & 12.3ms & 8.1ms & 1.52$\times$ & 1.8$\times$ \\
-1024 & 45.6ms & 18.4ms & 2.48$\times$ & 2.3$\times$ \\
-2048 & 178.2ms & 42.1ms & 4.23$\times$ & 3.1$\times$ \\
-4096 & OOM & 98.7ms & $\infty$ & 4.0$\times$ \\
-8192 & OOM & 215.3ms & $\infty$ & $\sim$8$\times$ \\
-16384 & OOM & 487.6ms & $\infty$ & $\sim$16$\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-ASAM achieves \textbf{2-8$\times$ speedup} over standard attention while using \textbf{4$\times$ less memory}. At 4K tokens and beyond, standard attention runs out of memory (OOM) while ASAM continues to operate efficiently.
-
-\subsection{Ablation Studies}
-
-Figure~\ref{fig:ablation} shows the contribution of each ASAM component. Removing any component degrades performance, confirming that adaptive gating, clustered patterns, and hierarchical structure all contribute to ASAM's effectiveness.
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{figures/figure4_ablation.pdf}
-    \caption{Ablation study results. Each component contributes to overall performance.}
-    \label{fig:ablation}
-\end{figure}
-
-\begin{table}[htbp]
-\centering
-\caption{Ablation Study: Impact of ASAM Components}
-\label{tab:ablation}
-\begin{tabular}{@{}lccc@{}}
-\toprule
-\textbf{Configuration} & \textbf{ListOps} & \textbf{Text} & \textbf{Speed} \\
-\midrule
-Full ASAM & \textbf{37.2} & \textbf{65.1} & 1.0$\times$ \\
-\quad w/o Adaptive Gate & 35.8 & 63.2 & 1.1$\times$ \\
-\quad w/o Clustered Pattern & 34.1 & 62.5 & 1.2$\times$ \\
-\quad w/o Hierarchical & 33.5 & 61.8 & 1.3$\times$ \\
-Standard Attention & 36.4 & 64.3 & 0.25$\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Removing any component degrades performance, confirming that all three innovations (adaptive gating, clustered patterns, hierarchical structure) contribute to ASAM's effectiveness.
-
-\subsection{Robustness Evaluation}
-
-We conduct comprehensive robustness tests:
-
-\begin{itemize}
-    \item \textbf{Gradient Stability}: 0\% NaN rate across 100 random trials
-    \item \textbf{Numerical Precision}: < 1e-6 difference between FP32 and FP64
-    \item \textbf{Variable Lengths}: Stable operation from 128 to 16K tokens
-    \item \textbf{Noise Resilience}: 0.94 correlation with 10\% input noise
-    \item \textbf{Adversarial Robustness}: 0.12 relative change under FGSM attack
-\end{itemize}
-
-ASAM demonstrates strong robustness across all tested dimensions.
-
-% Conclusion
 \section{Conclusion}
 \label{sec:conclusion}
 
-We present ASAM, a novel adaptive sparse attention mechanism that dynamically balances between computational efficiency and model expressiveness. Through differentiable adaptive gating, hierarchical multi-scale patterns, and learnable clustered sparsity, ASAM achieves state-of-the-art results on the Long Range Arena benchmark while maintaining 2-8$\times$ speedup and 4$\times$ memory reduction.
-
-\subsection{Limitations and Future Work}
-
-While ASAM demonstrates strong results, several directions remain for future work:
-
-\begin{itemize}
-    \item Integration with Flash Attention kernels for further optimization
-    \item Hardware-specific optimizations (TPU, custom ASICs)
-    \item Hybrid architectures combining ASAM with State Space Models
-    \item Pre-trained models for transfer learning
-    \item Multi-modal extensions (vision, audio)
-\end{itemize}
-
-\subsection{Broader Impact}
-
-Efficient attention mechanisms like ASAM enable practical deployment of transformer models on resource-constrained devices and facilitate processing of long documents, genomic sequences, and time series data. By reducing computational requirements, ASAM contributes to democratizing access to large-scale AI systems.
+ASAM reframes sparse attention and continual prototype routing as instances of a single adaptive sparse routing operator. The current mathematical contribution is the decomposition into support selection, support-feasible capacity projection, and sparse aggregation. The current empirical contribution is narrower: an artifact-audited pipeline that prevents unsupported benchmark-leadership claims and records negative continual-learning findings. The remaining work is to replace diagnostics with full paper-facing long-context and continual suites under the same provenance standard.
 
 
 
@@ -413,49 +270,52 @@ To assess whether the adaptive sparse-routing ideas behind ASAM can be extended 
 
 \subsection{Setup}
 
-We evaluate the continual extension on class-incremental Split AG News with 2 tasks of 2 classes each and a compact text classifier built from continual ASAM layers. The current paper-oriented run uses sequence length $128$, batch size $8$, $256$ training examples and $128$ validation examples per split, 1 layer with model width $64$, 4 heads, top-$k=2$ sparse pattern selection, AdamW with learning rate $3 \times 10^{-4}$, and 1 training epoch per task. Strategy-level and operator-level ablations are aggregated over 3 seeds. This setting is deliberately modest and CPU-runnable, so it should be interpreted as a controlled pilot benchmark rather than a final large-scale continual-learning claim.
+We evaluate the continual extension on class-incremental Split AG News with 2 tasks of 2 classes each and a compact text classifier built from continual ASAM layers. The current paper-oriented run uses sequence length $64$, batch size $4$, $16$ training examples and $8$ validation examples per split, 1 layer with model width $32$, 2 heads, top-$k=2$ sparse pattern selection, AdamW with learning rate $3 \times 10^{-4}$, and 1 training epoch per task. Strategy-level and operator-level ablations are aggregated over 1 seed. This setting is deliberately modest and CPU-runnable, so it should be interpreted as a controlled pilot benchmark rather than a final large-scale continual-learning claim.
 
 \subsection{Diagnostic Benchmark}
 
-The single-run prototype-routing benchmark with the meta-secant controller reaches average accuracy 0.5391, average forgetting -0.0625, and backward transfer 0.0625. Because this benchmark is single-seed, we use it primarily as a diagnostic case study: it is useful for inspecting stage-wise transport loss, routing stability, entropy, and prototype occupancy, but it should not be treated as the main comparative result.
+The single-run prototype-routing benchmark with the meta-secant controller reaches average accuracy 0.5000, average forgetting 0.2500, and backward transfer -0.2500. Because this benchmark is single-seed, we use it primarily as a diagnostic case study: it is useful for inspecting stage-wise transport loss, routing stability, entropy, and prototype occupancy, but it should not be treated as the main comparative result.
 
 \subsection{Strategy-Level Ablation}
 
-Table~\ref{tab:continual_strategy_ablation} summarizes the current multi-seed routing/controller comparison. The strongest strategy in the present setup is still the explicit task-conditioned baseline, not a prototype-routed variant. This is an important negative result: the current continual ASAM implementation is measurable and executable, but it does not yet outperform task-ID routing on retention at this scale.
+Table~\ref{tab:continual_strategy_ablation} summarizes the current single-seed routing/controller comparison. The strongest strategy in the present setup is still the explicit task-conditioned baseline, not a prototype-routed variant. This is an important negative result: the current continual ASAM implementation is measurable and executable, but it does not yet improve over task-ID routing on retention at this scale.
 
 \begin{table}[htbp]
 \centering
-\caption{Strategy-level continual ablation on Split AG News (3 seeds). Higher accuracy and backward transfer are better; lower forgetting is better.}
+\caption{Strategy-level continual ablation on Split AG News (1 seed). Higher accuracy and backward transfer are better; lower forgetting is better.}
 \label{tab:continual_strategy_ablation}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
 \textbf{Strategy} & \textbf{Avg Acc.} & \textbf{Avg Forgetting} & \textbf{BWT} & \textbf{Final Gap} \\
 \midrule
-\texttt{task\_routing} & $0.5234 \pm 0.0447$ & $-0.0469 \pm 0.0776$ & $0.0469 \pm 0.0776$ & $0.0000 \pm 0.0000$ \\
-\texttt{no\_adaptation} & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $-0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ \\
-\texttt{correlation} & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $-0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ \\
-\texttt{meta\_secant} & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $-0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ \\
+\texttt{task\_routing} & $0.6250 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+\texttt{no\_adaptation} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ \\
+\texttt{correlation} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0240 \pm 0.0000$ \\
+\texttt{dual\_transport} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ \\
+\texttt{meta\_secant} & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $-0.2500 \pm 0.0000$ & $0.0240 \pm 0.0000$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Operator-Level Ablation}
 
-Table~\ref{tab:continual_operator_ablation} isolates several operator choices inside prototype-routed continual ASAM. Task-level differences are currently modest, but the transport-facing diagnostics already reveal a meaningful pattern: \texttt{sinkhorn\_topk} and \texttt{kl\_topk} achieve the same mean accuracy, while the Sinkhorn version preserves a final transport gap of 0.0000 and the KL-based variant shows 0.0008. Disabling the transport term slightly lowers accuracy to 0.4948 and raises the final transport-loss trace to 0.0418. We therefore interpret the present operator study as an early mechanistic signal rather than a decisive empirical win.
+Table~\ref{tab:continual_operator_ablation} isolates several operator choices inside prototype-routed continual ASAM. In this single-seed smoke run, operator variants have identical accuracy; only transport-facing traces differ. \texttt{sinkhorn\_topk} records a final transport gap of 0.0236, while \texttt{kl\_topk} records 0.0149. \texttt{no\_transport} reports average accuracy 0.5000 and final transport loss 0.0704. We therefore interpret the present operator study as an early mechanistic signal rather than a decisive empirical win.
 
 \begin{table}[htbp]
 \centering
-\caption{Operator-level continual ablation on Split AG News (3 seeds).}
+\caption{Operator-level continual ablation on Split AG News (1 seed).}
 \label{tab:continual_operator_ablation}
 \begin{tabular}{@{}lccccc@{}}
 \toprule
 \textbf{Operator Setting} & \textbf{Routing} & \textbf{Avg Acc.} & \textbf{Avg Forgetting} & \textbf{Final Gap} & \textbf{Final Transport} \\
 \midrule
-\texttt{sinkhorn\_topk} & Sinkhorn Top-$k$ & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ & $0.0381 \pm 0.0076$ \\
-\texttt{kl\_topk} & KL Top-$k$ & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $0.0008 \pm 0.0003$ & $0.0370 \pm 0.0071$ \\
-\texttt{no\_transport} & Sinkhorn Top-$k$ & $0.4948 \pm 0.0258$ & $0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ & $0.0418 \pm 0.0098$ \\
-\texttt{no\_merge} & Sinkhorn Top-$k$ & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ & $0.0381 \pm 0.0076$ \\
-\texttt{no\_relocation} & Sinkhorn Top-$k$ & $0.4974 \pm 0.0295$ & $0.0469 \pm 0.0837$ & $0.0000 \pm 0.0000$ & $0.0381 \pm 0.0076$ \\
+\texttt{sinkhorn\_topk} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ & $0.0740 \pm 0.0000$ \\
+\texttt{kl\_topk} & KL Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0149 \pm 0.0000$ & $0.0503 \pm 0.0000$ \\
+\texttt{masked\_sinkhorn\_topk} & Masked Sinkhorn Topk & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0000 \pm 0.0000$ & $0.0606 \pm 0.0000$ \\
+\texttt{sinkhorn\_support\_masked} & Sinkhorn Support Masked & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0000 \pm 0.0000$ & $0.0740 \pm 0.0000$ \\
+\texttt{no\_transport} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ & $0.0704 \pm 0.0000$ \\
+\texttt{no\_merge} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0174 \pm 0.0000$ & $0.0912 \pm 0.0000$ \\
+\texttt{no\_relocation} & Sinkhorn Top-$k$ & $0.5000 \pm 0.0000$ & $0.2500 \pm 0.0000$ & $0.0236 \pm 0.0000$ & $0.0674 \pm 0.0000$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -470,10 +330,7 @@ The current continual-learning results support a narrow but honest conclusion. T
 
 
 
-% Acknowledgments
-\section*{Acknowledgments}
 
-We thank the open-source community for valuable tools and datasets. This work was inspired by pioneering research in sparse attention, including Longformer, BigBird, and Performer.
 
 % References
 \bibliographystyle{plainnat}

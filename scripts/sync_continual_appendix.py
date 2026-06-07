@@ -51,6 +51,22 @@ def _format_learning_rate(value: float) -> str:
     return f"{mantissa} \\times 10^{{{exponent_int}}}"
 
 
+def _format_seed_count(num_seeds) -> str:
+    try:
+        seed_count = int(num_seeds)
+    except (TypeError, ValueError):
+        return f"{num_seeds} seeds"
+    return "1 seed" if seed_count == 1 else f"{seed_count} seeds"
+
+
+def _routing_comparison_scope(num_seeds) -> str:
+    try:
+        seed_count = int(num_seeds)
+    except (TypeError, ValueError):
+        return "seed-aggregated"
+    return "single-seed" if seed_count == 1 else "multi-seed"
+
+
 def _find_strategy(rows: List[Dict], name: str) -> Optional[Dict]:
     for row in rows:
         if row.get("strategy") == name:
@@ -125,12 +141,14 @@ def build_continual_appendix(
     learning_rate = benchmark_config.get("learning_rate", 0.0)
     epochs_per_task = benchmark_config.get("epochs_per_task", "?")
     num_seeds = ablation["config"].get("num_seeds", "?")
+    seed_count_text = _format_seed_count(num_seeds)
+    comparison_scope = _routing_comparison_scope(num_seeds)
 
     if best_strategy["strategy"] == "task_routing":
         strategy_take = (
             "The strongest strategy in the present setup is still the explicit task-conditioned baseline, "
             "not a prototype-routed variant. This is an important negative result: the current continual "
-            "ASAM implementation is measurable and executable, but it does not yet outperform task-ID routing "
+            "ASAM implementation is measurable and executable, but it does not yet improve over task-ID routing "
             "on retention at this scale."
         )
         takeaway_text = (
@@ -157,7 +175,7 @@ def build_continual_appendix(
                 "and operator-level ablations. In this specific small-scale CPU run, the best prototype-routed variant "
                 "improves average accuracy over " + r"\texttt{task\_routing}" + f" by {_format_scalar(avg_accuracy_gap)} and "
                 f"reduces average forgetting by {_format_scalar(avg_forgetting_gain)}. At the same time, the margin is "
-                f"small and the benchmark remains low-budget ({num_seeds} seeds with modest sample counts), so this "
+                f"small and the benchmark remains low-budget ({seed_count_text} with modest sample counts), so this "
                 "should be treated as an encouraging pilot signal rather than a decisive retention claim. Stronger data "
                 "scale, longer training, and richer ablations are still needed before claiming a robust empirical advantage."
             )
@@ -173,17 +191,25 @@ def build_continual_appendix(
     operator_take_parts = [
         "Table~\\ref{tab:continual_operator_ablation} isolates several operator choices inside prototype-routed continual ASAM."
     ]
+    accuracy_values = {
+        round(row["avg_accuracy_mean"], 8) for row in operators if "avg_accuracy_mean" in row
+    }
+    if len(accuracy_values) == 1:
+        operator_take_parts.append(
+            f"In this {comparison_scope} smoke run, operator variants have identical accuracy; only "
+            "transport-facing traces differ."
+        )
     if sinkhorn_row and kl_row:
         operator_take_parts.append(
-            "Task-level differences are currently modest, but the transport-facing diagnostics already reveal a "
-            f"meaningful pattern: \\texttt{{sinkhorn\\_topk}} and \\texttt{{kl\\_topk}} achieve the same mean accuracy, "
-            f"while the Sinkhorn version preserves a final transport gap of {_format_scalar(sinkhorn_row['final_transport_gap_mean'])} "
-            f"and the KL-based variant shows {_format_scalar(kl_row['final_transport_gap_mean'])}."
+            f"\\texttt{{sinkhorn\\_topk}} records a final transport gap of "
+            f"{_format_scalar(sinkhorn_row['final_transport_gap_mean'])}, while "
+            f"\\texttt{{kl\\_topk}} records {_format_scalar(kl_row['final_transport_gap_mean'])}."
         )
     if no_transport_row:
         operator_take_parts.append(
-            f"Disabling the transport term slightly lowers accuracy to {_format_scalar(no_transport_row['avg_accuracy_mean'])} "
-            f"and raises the final transport-loss trace to {_format_scalar(no_transport_row['final_transport_loss_mean'])}."
+            f"\\texttt{{no\\_transport}} reports average accuracy "
+            f"{_format_scalar(no_transport_row['avg_accuracy_mean'])} and final transport loss "
+            f"{_format_scalar(no_transport_row['final_transport_loss_mean'])}."
         )
     operator_take_parts.append(
         "We therefore interpret the present operator study as an early mechanistic signal rather than a decisive empirical win."
@@ -210,7 +236,7 @@ To assess whether the adaptive sparse-routing ideas behind ASAM can be extended 
 
 \\subsection{{Setup}}
 
-We evaluate the continual extension on class-incremental {dataset_display_name} with {task_count} tasks of {classes_per_task} classes each and a compact text classifier built from continual ASAM layers. The current paper-oriented run uses sequence length ${max_length}$, batch size ${batch_size}$, ${train_samples}$ training examples and ${val_samples}$ validation examples per split, {num_layers} layer with model width ${dim}$, {num_heads} heads, top-$k={top_k_patterns}$ sparse pattern selection, AdamW with learning rate ${_format_learning_rate(learning_rate)}$, and {epochs_per_task} training epoch per task. Strategy-level and operator-level ablations are aggregated over {num_seeds} seeds. This setting is deliberately modest and CPU-runnable, so it should be interpreted as a controlled pilot benchmark rather than a final large-scale continual-learning claim.
+We evaluate the continual extension on class-incremental {dataset_display_name} with {task_count} tasks of {classes_per_task} classes each and a compact text classifier built from continual ASAM layers. The current paper-oriented run uses sequence length ${max_length}$, batch size ${batch_size}$, ${train_samples}$ training examples and ${val_samples}$ validation examples per split, {num_layers} layer with model width ${dim}$, {num_heads} heads, top-$k={top_k_patterns}$ sparse pattern selection, AdamW with learning rate ${_format_learning_rate(learning_rate)}$, and {epochs_per_task} training epoch per task. Strategy-level and operator-level ablations are aggregated over {seed_count_text}. This setting is deliberately modest and CPU-runnable, so it should be interpreted as a controlled pilot benchmark rather than a final large-scale continual-learning claim.
 
 \\subsection{{Diagnostic Benchmark}}
 
@@ -218,11 +244,11 @@ The single-run prototype-routing benchmark with the {benchmark_strategy_display}
 
 \\subsection{{Strategy-Level Ablation}}
 
-Table~\\ref{{tab:continual_strategy_ablation}} summarizes the current multi-seed routing/controller comparison. {strategy_take}
+Table~\\ref{{tab:continual_strategy_ablation}} summarizes the current {comparison_scope} routing/controller comparison. {strategy_take}
 
 \\begin{{table}}[htbp]
 \\centering
-\\caption{{Strategy-level continual ablation on {dataset_display_name} ({num_seeds} seeds). Higher accuracy and backward transfer are better; lower forgetting is better.}}
+\\caption{{Strategy-level continual ablation on {dataset_display_name} ({seed_count_text}). Higher accuracy and backward transfer are better; lower forgetting is better.}}
 \\label{{tab:continual_strategy_ablation}}
 \\begin{{tabular}}{{@{{}}lcccc@{{}}}}
 \\toprule
@@ -239,7 +265,7 @@ Table~\\ref{{tab:continual_strategy_ablation}} summarizes the current multi-seed
 
 \\begin{{table}}[htbp]
 \\centering
-\\caption{{Operator-level continual ablation on {dataset_display_name} ({num_seeds} seeds).}}
+\\caption{{Operator-level continual ablation on {dataset_display_name} ({seed_count_text}).}}
 \\label{{tab:continual_operator_ablation}}
 \\begin{{tabular}}{{@{{}}lccccc@{{}}}}
 \\toprule
