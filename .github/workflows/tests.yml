@@ -91,10 +91,11 @@ jobs:
             tests/test_continual_capacity_sweep.py \
             tests/test_paper_pipeline.py \
             tests/test_sync_continual_appendix.py \
+            tests/test_long_context_paper_suite.py \
             --cov=asam --cov-report=xml --cov-report=term
 
       - name: Generate experiment artifact audit
-        run: python scripts/audit_experiment_artifacts.py experiments/paper_suite_canonical_smoke > experiment_artifact_audit.json
+        run: python scripts/audit_experiment_artifacts.py experiments/paper_suite_canonical_smoke experiments/paper_suite_long_context_smoke > experiment_artifact_audit.json
 
       - name: Upload diagnostic artifacts
         uses: actions/upload-artifact@v4

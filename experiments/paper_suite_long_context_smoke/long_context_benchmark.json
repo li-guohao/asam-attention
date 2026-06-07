@@ -1,0 +1,180 @@
+{
+  "suite_type": "long_context",
+  "benchmark_name": "lra_style_synthetic_diagnostic",
+  "claim_scope": "diagnostic_only",
+  "sequence_lengths": [
+    32,
+    64,
+    128
+  ],
+  "models": [
+    "asam",
+    "transformer",
+    "local",
+    "longformer_style"
+  ],
+  "metric_names": [
+    "latency_ms_mean",
+    "latency_ms_std",
+    "peak_memory_mb",
+    "finite_output_rate"
+  ],
+  "results": [
+    {
+      "model": "asam",
+      "sequence_length": 32,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.4532999955699779,
+      "latency_ms_std": 0.0997999906539917,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "transformer",
+      "sequence_length": 32,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.13830000534653664,
+      "latency_ms_std": 0.023200001567602158,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "local",
+      "sequence_length": 32,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.1382000045850873,
+      "latency_ms_std": 0.013800002634525299,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "longformer_style",
+      "sequence_length": 32,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.127650004287716,
+      "latency_ms_std": 0.005050003528594971,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "asam",
+      "sequence_length": 64,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.5490500043379143,
+      "latency_ms_std": 0.1075499951839447,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "transformer",
+      "sequence_length": 64,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.26950000028591603,
+      "latency_ms_std": 0.019599996507167816,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "local",
+      "sequence_length": 64,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.1466999965487048,
+      "latency_ms_std": 0.00899999588727951,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "longformer_style",
+      "sequence_length": 64,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.14585000462830067,
+      "latency_ms_std": 0.005549997091293335,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "asam",
+      "sequence_length": 128,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.7177500083344057,
+      "latency_ms_std": 0.019649982452392578,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "transformer",
+      "sequence_length": 128,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.15374999929917976,
+      "latency_ms_std": 0.010449998080730438,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "local",
+      "sequence_length": 128,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.20244999905116856,
+      "latency_ms_std": 0.006849996745586395,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    },
+    {
+      "model": "longformer_style",
+      "sequence_length": 128,
+      "batch_size": 1,
+      "dim": 32,
+      "num_heads": 2,
+      "latency_ms_mean": 0.1887500038719736,
+      "latency_ms_std": 0.0028500035405158997,
+      "peak_memory_mb": 0.0,
+      "finite_output_rate": 1.0,
+      "diagnostic_score": 1.0,
+      "success": true
+    }
+  ]
+}

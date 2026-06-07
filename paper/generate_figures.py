@@ -28,7 +28,7 @@ def load_lra_results(json_path="experiments/lra_results.json"):
     """Load real benchmark results from JSON, fall back to simulated if missing.
 
     Returns:
-        List of result dicts or None if file not found (caller should use fallback).
+        List of result dicts or None if file not found.
     """
     try:
         with open(json_path) as f:
@@ -42,7 +42,7 @@ def load_lra_results(json_path="experiments/lra_results.json"):
             print(f"Warning: {json_path} contains only errors, using simulated data")
             return None
     except FileNotFoundError:
-        print(f"Warning: {json_path} not found, using simulated fallback data")
+        print(f"Warning: {json_path} not found; skipping unaudited LRA table values")
         return None
 
 
@@ -62,7 +62,7 @@ def load_ablation_results(json_path="experiments/ablation_results.json"):
         else:
             return None
     except FileNotFoundError:
-        print(f"Warning: {json_path} not found, using simulated fallback data")
+        print(f"Warning: {json_path} not found; skipping unaudited ablation table values")
         return None
 
 
@@ -89,7 +89,7 @@ def generate_figure1_lra_results():
         image      = [acc_map.get((m, "image"), 0)      for m in models_order]
         pathfinder = [acc_map.get((m, "pathfinder"), 0) for m in models_order]
     else:
-        # Fallback simulated data (marked as such)
+        # Diagnostic placeholder data for plot layout only.
         models = ['Transformer', 'Local Attn', 'Sparse\nTransformer', 'Longformer',
                   'Linformer', 'Performer', 'ASAM (Ours)']
 
@@ -466,17 +466,7 @@ def generate_table_data():
             avg = sum(vals) / len(vals)
             print(f"{model_labels[model]} & " + " & ".join([f"{v:.1f}" for v in vals]) + f" & {avg:.1f} \\\\")
     else:
-        data = [
-            ("Transformer", 36.4, 64.3, 57.5, 42.2, 71.8, 50.1),
-            ("Local Attn", 15.8, 52.9, 53.4, 41.5, 69.4, 40.9),
-            ("Sparse Trans", 17.1, 63.6, 59.6, 44.2, 71.5, 46.1),
-            ("Longformer", 35.7, 62.8, 56.9, 42.2, 69.4, 49.4),
-            ("Linformer", 35.7, 53.9, 52.3, 38.6, 76.3, 45.1),
-            ("Performer", 18.0, 65.4, 53.1, 42.8, 77.1, 44.8),
-            ("\\textbf{ASAM}", 37.2, 65.1, 58.3, 43.1, 74.2, 50.9),
-        ]
-        for name, *vals in data:
-            print(f"{name} & " + " & ".join([f"{v:.1f}" for v in vals]) + " \\\\")
+        print("\\multicolumn{7}{c}{No manifest-audited LRA values available} \\\\")
 
     print("\\bottomrule")
     print("\\end{tabular}")
@@ -505,16 +495,7 @@ def generate_table_data():
             label = config_labels.get(c, c)
             print(f"{label} & {listops_val} & {text_val} \\\\")
     else:
-        # Fallback simulated ablation data
-        ablation_data_fallback = [
-            ("Full ASAM", 37.2, 65.1),
-            ("w/o Gate", 35.8, 63.2),
-            ("w/o Clustered", 34.1, 62.5),
-            ("w/o Hierarchical", 33.5, 61.8),
-            ("Standard Attn", 36.4, 64.3),
-        ]
-        for name, l, t in ablation_data_fallback:
-            print(f"{name} & {l} & {t} \\\\")
+        print("\\multicolumn{3}{c}{No manifest-audited ablation values available} \\\\")
 
     print("\\bottomrule")
     print("\\end{tabular}")

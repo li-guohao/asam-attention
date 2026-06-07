@@ -1,0 +1,118 @@
+{
+  "suite_type": "long_context",
+  "config": {
+    "output_dir": "experiments/paper_suite_long_context_smoke",
+    "sequence_lengths": [
+      32,
+      64,
+      128
+    ],
+    "models": [
+      "asam",
+      "transformer",
+      "local",
+      "longformer_style"
+    ],
+    "batch_size": 1,
+    "dim": 32,
+    "num_heads": 2,
+    "window_size": 16,
+    "global_tokens": 1,
+    "warmup": 1,
+    "repeats": 2,
+    "seed": 42,
+    "device": "cpu"
+  },
+  "resolved_config": {
+    "output_dir": "experiments/paper_suite_long_context_smoke",
+    "sequence_lengths": [
+      32,
+      64,
+      128
+    ],
+    "models": [
+      "asam",
+      "transformer",
+      "local",
+      "longformer_style"
+    ],
+    "batch_size": 1,
+    "dim": 32,
+    "num_heads": 2,
+    "window_size": 16,
+    "global_tokens": 1,
+    "warmup": 1,
+    "repeats": 2,
+    "seed": 42,
+    "device": "cpu"
+  },
+  "candidate_profile": "long_context_smoke",
+  "candidate_profile_description": "CPU-runnable LRA-style synthetic diagnostic suite.",
+  "output_dir": "experiments\\paper_suite_long_context_smoke",
+  "benchmark_json": "experiments\\paper_suite_long_context_smoke\\long_context_benchmark.json",
+  "benchmark_csv": "experiments\\paper_suite_long_context_smoke\\long_context_benchmark.csv",
+  "benchmark_report": "experiments\\paper_suite_long_context_smoke\\long_context_benchmark_report.md",
+  "provenance": {
+    "argv": [
+      "scripts/run_long_context_paper_suite.py",
+      "--output-dir",
+      "experiments/paper_suite_long_context_smoke",
+      "--sequence-lengths",
+      "32,64,128",
+      "--models",
+      "asam,transformer,local,longformer_style",
+      "--batch-size",
+      "1",
+      "--dim",
+      "32",
+      "--num-heads",
+      "2",
+      "--window-size",
+      "16",
+      "--warmup",
+      "1",
+      "--repeats",
+      "2",
+      "--device",
+      "cpu"
+    ],
+    "python_version": "3.14.2",
+    "torch_version": "2.12.0+cpu",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "started_at_utc": "2026-06-07T16:42:51.949375Z",
+    "finished_at_utc": "2026-06-07T16:42:52.088506Z",
+    "git": {
+      "commit": "e3aeb39174ed0bca366294f78ca4e092daf2d7f1",
+      "dirty": true,
+      "status_porcelain": "M .github/workflows/tests.yml\n M scripts/audit_experiment_artifacts.py\n M tests/test_ci_workflow.py\n M tests/test_experiment_artifact_audit.py\n?? audit_all_suites.json\n?? scripts/run_long_context_paper_suite.py\n?? tests/test_long_context_paper_suite.py\n?? uv.lock"
+    },
+    "device": "cpu",
+    "benchmark": {
+      "name": "lra_style_synthetic_diagnostic",
+      "source_kind": "synthetic",
+      "claim_scope": "diagnostic_only",
+      "sequence_lengths": [
+        32,
+        64,
+        128
+      ],
+      "models": [
+        "asam",
+        "transformer",
+        "local",
+        "longformer_style"
+      ],
+      "metric_names": [
+        "latency_ms_mean",
+        "latency_ms_std",
+        "peak_memory_mb",
+        "finite_output_rate"
+      ]
+    },
+    "output_hashes": {
+      "long_context_benchmark.json": "a438ae38413b5a4eba124c39b49b6671afc708d10f0ff96d8e988c9487f9e1de",
+      "long_context_benchmark.csv": "fefb066e34ae4749a541ece94693239b21a9127b12474707f70cd80f51574bed",
+      "long_context_benchmark_report.md": "b76ea706b7a3c7316011527312b53ffa3d6882198925149b16a41d03ded4dfcd"
+    }
+  }
+}

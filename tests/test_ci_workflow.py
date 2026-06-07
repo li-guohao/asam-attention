@@ -59,6 +59,7 @@ def test_ci_workflow_installs_plotting_dependency_and_audits_artifacts():
     assert '".[dev,viz]"' in workflow
     assert "scripts/audit_experiment_artifacts.py" in workflow
     assert "experiments/paper_suite_canonical_smoke" in workflow
+    assert "experiments/paper_suite_long_context_smoke" in workflow
     assert "experiment_artifact_audit.json" in workflow
     assert (
         "scripts/audit_experiment_artifacts.py > experiment_artifact_audit.json || true"

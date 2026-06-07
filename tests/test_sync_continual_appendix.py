@@ -30,6 +30,41 @@ def test_paper_avoids_overstated_claim_phrases():
     assert "1 seeds" not in paper_text
 
 
+def test_paper_directory_has_no_stale_generated_strong_claims():
+    paper_files = [
+        repo_root / "paper" / "asam_paper.tex",
+        repo_root / "paper" / "asam_paper_accuracy.tex",
+        repo_root / "paper" / "asam_paper_retention.tex",
+        repo_root / "paper" / "asam_paper_retention_no_transport.tex",
+        repo_root / "paper" / "continual_appendix_only.tex",
+        repo_root / "paper" / "continual_appendix_retention.tex",
+    ]
+    banned_phrases = [
+        "state-of-the-art",
+        "50.9",
+        "2-8",
+        "4\\times",
+        "NVIDIA A100",
+        "github.com/li-guohao/asam-attention",
+        "does not yet outperform",
+    ]
+
+    for paper_file in paper_files:
+        paper_text = paper_file.read_text(encoding="utf-8")
+        for banned_phrase in banned_phrases:
+            assert banned_phrase not in paper_text, f"{paper_file} contains stale claim: {banned_phrase}"
+
+
+def test_paper_mentions_long_context_smoke_as_diagnostic_only():
+    paper_text = (repo_root / "paper" / "asam_paper.tex").read_text(encoding="utf-8")
+
+    assert "experiments/paper\\_suite\\_long\\_context\\_smoke" in paper_text
+    assert "LRA-style synthetic operator/runtime diagnostic" in paper_text
+    assert "not an official LRA result" in paper_text
+    assert "Long-context diagnostic smoke & Current manifest" in paper_text
+    assert "Long-context runtime sweep & Pending manifest" not in paper_text
+
+
 def test_build_continual_appendix_renders_expected_tables(tmp_path):
     benchmark = {
         "config": {

@@ -186,6 +186,18 @@ def _load_named_json(suite_path: Path, name: str) -> Any | None:
 
 
 VALID_DATASET_SOURCE_KINDS = {"huggingface", "fallback_synthetic"}
+LONG_CONTEXT_SUITE = "long_context"
+CONTINUAL_SUITE = "continual"
+REQUIRED_LONG_CONTEXT_MODELS = {"asam", "transformer", "local", "longformer_style"}
+REQUIRED_LONG_CONTEXT_METRICS = {
+    "latency_ms_mean",
+    "peak_memory_mb",
+    "finite_output_rate",
+}
+
+
+def _suite_type(manifest: dict[str, Any]) -> str:
+    return str(manifest.get("suite_type") or CONTINUAL_SUITE)
 
 
 def _dataset_provenance_schema_issues(provenance: Any, prefix: str) -> list[str]:
@@ -218,6 +230,40 @@ def _dataset_provenance_schema_issues(provenance: Any, prefix: str) -> list[str]
     return missing
 
 
+def _long_context_provenance_schema_issues(provenance: Any) -> list[str]:
+    missing: list[str] = []
+    benchmark = provenance.get("benchmark") if isinstance(provenance, dict) else None
+    if not isinstance(benchmark, dict):
+        return ["provenance.benchmark"]
+
+    if benchmark.get("source_kind") != "synthetic":
+        missing.append("provenance.benchmark.source_kind")
+    if benchmark.get("claim_scope") != "diagnostic_only":
+        missing.append("provenance.benchmark.claim_scope")
+    if not benchmark.get("name"):
+        missing.append("provenance.benchmark.name")
+
+    sequence_lengths = benchmark.get("sequence_lengths")
+    if (
+        not isinstance(sequence_lengths, list)
+        or len(sequence_lengths) < 3
+        or any(not isinstance(length, int) or length <= 0 for length in sequence_lengths)
+    ):
+        missing.append("provenance.benchmark.sequence_lengths")
+
+    models = benchmark.get("models")
+    if not isinstance(models, list) or not REQUIRED_LONG_CONTEXT_MODELS.issubset(set(models)):
+        missing.append("provenance.benchmark.models")
+
+    metric_names = benchmark.get("metric_names")
+    if not isinstance(metric_names, list) or not REQUIRED_LONG_CONTEXT_METRICS.issubset(
+        set(metric_names)
+    ):
+        missing.append("provenance.benchmark.metric_names")
+
+    return missing
+
+
 def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
     provenance = manifest.get("provenance")
     if not isinstance(provenance, dict):
@@ -231,7 +277,6 @@ def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
         "started_at_utc",
         "finished_at_utc",
         "git",
-        "dataset",
         "output_hashes",
     ]:
         if not provenance.get(key):
@@ -246,30 +291,39 @@ def _has_strict_provenance(manifest: dict[str, Any]) -> tuple[bool, list[str]]:
         if not isinstance(git.get("dirty"), bool):
             missing.append("provenance.git.dirty")
 
-    dataset = provenance.get("dataset")
-    if not isinstance(dataset, dict):
-        missing.append("provenance.dataset")
+    if _suite_type(manifest) == LONG_CONTEXT_SUITE:
+        missing.extend(_long_context_provenance_schema_issues(provenance))
+        required_output_hashes = [
+            "long_context_benchmark.json",
+            "long_context_benchmark.csv",
+            "long_context_benchmark_report.md",
+        ]
     else:
-        for key in ["name", "classes_per_task", "seed", "num_seeds"]:
-            if dataset.get(key) is None:
-                missing.append(f"provenance.dataset.{key}")
-        benchmark_provenance = dataset.get("benchmark_provenance")
-        missing.extend(
-            _dataset_provenance_schema_issues(
-                benchmark_provenance,
-                "provenance.dataset.benchmark_provenance",
+        dataset = provenance.get("dataset")
+        if not isinstance(dataset, dict):
+            missing.append("provenance.dataset")
+        else:
+            for key in ["name", "classes_per_task", "seed", "num_seeds"]:
+                if dataset.get(key) is None:
+                    missing.append(f"provenance.dataset.{key}")
+            benchmark_provenance = dataset.get("benchmark_provenance")
+            missing.extend(
+                _dataset_provenance_schema_issues(
+                    benchmark_provenance,
+                    "provenance.dataset.benchmark_provenance",
+                )
             )
-        )
+        required_output_hashes = [
+            "continual_benchmark.json",
+            "continual_ablation.json",
+            "continual_operator_ablation.json",
+        ]
 
     output_hashes = provenance.get("output_hashes")
     if not isinstance(output_hashes, dict):
         missing.append("provenance.output_hashes")
     else:
-        for key in [
-            "continual_benchmark.json",
-            "continual_ablation.json",
-            "continual_operator_ablation.json",
-        ]:
+        for key in required_output_hashes:
             value = output_hashes.get(key)
             if not isinstance(value, str) or len(value) != 64:
                 missing.append(f"provenance.output_hashes.{key}")
@@ -360,6 +414,8 @@ def _audit_benchmark_dataset_provenance(
     suite_path: Path, manifest: dict[str, Any]
 ) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
+    if _suite_type(manifest) == LONG_CONTEXT_SUITE:
+        return issues
     benchmark_path = suite_path / "continual_benchmark.json"
     if not benchmark_path.exists():
         return issues
@@ -419,6 +475,61 @@ def _audit_benchmark_dataset_provenance(
     return issues
 
 
+def _audit_long_context_benchmark(
+    suite_path: Path, manifest: dict[str, Any]
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    if _suite_type(manifest) != LONG_CONTEXT_SUITE:
+        return issues
+
+    benchmark_path = suite_path / "long_context_benchmark.json"
+    benchmark = _load_named_json(suite_path, "long_context_benchmark.json")
+    if not isinstance(benchmark, dict):
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": "long-context benchmark JSON is missing or not a JSON object",
+            }
+        )
+        return issues
+
+    provenance_benchmark = manifest.get("provenance", {}).get("benchmark", {})
+    for key in ["claim_scope", "sequence_lengths", "models"]:
+        if benchmark.get(key) != provenance_benchmark.get(key):
+            issues.append(
+                {
+                    "severity": "blocking",
+                    "suite": str(suite_path),
+                    "path": str(benchmark_path),
+                    "message": f"long-context benchmark {key} does not match manifest provenance",
+                }
+            )
+
+    if benchmark.get("claim_scope") != "diagnostic_only":
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": "long-context benchmark must be diagnostic_only",
+            }
+        )
+
+    results = benchmark.get("results")
+    if not isinstance(results, list) or not results:
+        issues.append(
+            {
+                "severity": "blocking",
+                "suite": str(suite_path),
+                "path": str(benchmark_path),
+                "message": "long-context benchmark has no result rows",
+            }
+        )
+    return issues
+
+
 def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     blocking: list[dict[str, str]] = []
     suspicious: list[dict[str, str]] = []
@@ -452,18 +563,28 @@ def _rate_suite_schema(suite_path: Path) -> tuple[str, list[dict[str, str]], lis
 
     has_provenance, missing_provenance = _has_strict_provenance(manifest)
     if not has_provenance:
+        message_prefix = (
+            "long-context benchmark manifest is missing strict provenance fields: "
+            if _suite_type(manifest) == LONG_CONTEXT_SUITE
+            else "manifest is missing strict provenance fields: "
+        )
         blocking.append(
             {
                 "severity": "blocking",
                 "suite": str(suite_path),
-                "message": "manifest is missing strict provenance fields: "
-                + ", ".join(missing_provenance),
+                "message": message_prefix + ", ".join(missing_provenance),
             }
         )
         return OUTDATED, blocking, suspicious
 
     blocking.extend(_audit_manifest_output_hashes(suite_path, manifest))
     blocking.extend(_audit_benchmark_dataset_provenance(suite_path, manifest))
+    blocking.extend(_audit_long_context_benchmark(suite_path, manifest))
+
+    if _suite_type(manifest) == LONG_CONTEXT_SUITE:
+        if blocking:
+            return OUTDATED, blocking, suspicious
+        return CURRENT, blocking, suspicious
 
     ablation = _load_named_json(suite_path, "continual_ablation.json")
     operator = _load_named_json(suite_path, "continual_operator_ablation.json")
