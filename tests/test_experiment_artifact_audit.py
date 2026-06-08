@@ -101,6 +101,128 @@ def _write_current_suite(suite):
     return manifest
 
 
+def _long_context_manifest():
+    return {
+        "suite_type": "long_context",
+        "resolved_config": {
+            "sequence_lengths": [32, 64, 128],
+            "models": ["asam", "transformer", "local", "longformer_style"],
+        },
+        "candidate_profile": "long_context_smoke",
+        "candidate_profile_description": "CPU-runnable long-context diagnostic smoke suite.",
+        "provenance": {
+            "argv": ["scripts/run_long_context_paper_suite.py"],
+            "python_version": "3.10.0",
+            "torch_version": "2.0.0",
+            "started_at_utc": "2026-01-01T00:00:00Z",
+            "finished_at_utc": "2026-01-01T00:01:00Z",
+            "git": {"commit": "abcdef0", "dirty": False},
+            "benchmark": {
+                "name": "lra_style_synthetic_diagnostic",
+                "source_kind": "synthetic",
+                "claim_scope": "diagnostic_only",
+                "sequence_lengths": [32, 64, 128],
+                "models": ["asam", "transformer", "local", "longformer_style"],
+                "metric_names": ["latency_ms_mean", "peak_memory_mb", "finite_output_rate"],
+            },
+            "output_hashes": {
+                "long_context_benchmark.json": "a" * 64,
+                "long_context_benchmark.csv": "b" * 64,
+                "long_context_benchmark_report.md": "c" * 64,
+            },
+        },
+        "benchmark_json": "old/path/long_context_benchmark.json",
+        "benchmark_csv": "old/path/long_context_benchmark.csv",
+        "benchmark_report": "old/path/long_context_benchmark_report.md",
+    }
+
+
+def _long_context_payload():
+    return {
+        "suite_type": "long_context",
+        "claim_scope": "diagnostic_only",
+        "sequence_lengths": [32, 64, 128],
+        "models": ["asam", "transformer", "local", "longformer_style"],
+        "results": [
+            {
+                "model": "asam",
+                "sequence_length": 32,
+                "latency_ms_mean": 1.0,
+                "peak_memory_mb": 0.0,
+                "finite_output_rate": 1.0,
+            },
+            {
+                "model": "transformer",
+                "sequence_length": 32,
+                "latency_ms_mean": 1.1,
+                "peak_memory_mb": 0.0,
+                "finite_output_rate": 1.0,
+            },
+            {
+                "model": "local",
+                "sequence_length": 32,
+                "latency_ms_mean": 1.2,
+                "peak_memory_mb": 0.0,
+                "finite_output_rate": 1.0,
+            },
+            {
+                "model": "longformer_style",
+                "sequence_length": 32,
+                "latency_ms_mean": 1.3,
+                "peak_memory_mb": 0.0,
+                "finite_output_rate": 1.0,
+            },
+        ],
+    }
+
+
+def _write_current_long_context_suite(suite):
+    benchmark = _long_context_payload()
+    csv = (
+        "model,sequence_length,latency_ms_mean,peak_memory_mb,finite_output_rate\n"
+        "asam,32,1.0,0.0,1.0\n"
+    )
+    report = "# Long-Context ASAM Paper Suite\n\nDiagnostic only.\n"
+    _write_json(suite / "long_context_benchmark.json", benchmark)
+    (suite / "long_context_benchmark.csv").write_text(csv, encoding="utf-8")
+    (suite / "long_context_benchmark_report.md").write_text(report, encoding="utf-8")
+
+    manifest = _long_context_manifest()
+    manifest["provenance"]["output_hashes"] = {
+        "long_context_benchmark.json": _file_sha256(suite / "long_context_benchmark.json"),
+        "long_context_benchmark.csv": _file_sha256(suite / "long_context_benchmark.csv"),
+        "long_context_benchmark_report.md": _file_sha256(
+            suite / "long_context_benchmark_report.md"
+        ),
+    }
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+    return manifest
+
+
+def test_long_context_manifest_with_strict_provenance_is_current(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_long_context_current"
+    _write_current_long_context_suite(suite)
+
+    summary = audit_paths([suite])
+
+    assert summary["suites"][0]["schema_provenance_rating"] == "CURRENT"
+    assert summary["blocking_issue_count"] == 0
+
+
+def test_long_context_manifest_requires_three_lengths_and_core_models(tmp_path):
+    suite = tmp_path / "experiments" / "paper_suite_long_context_bad"
+    _write_current_long_context_suite(suite)
+    manifest = json.loads((suite / "paper_suite_manifest.json").read_text(encoding="utf-8"))
+    manifest["provenance"]["benchmark"]["sequence_lengths"] = [32, 64]
+    manifest["provenance"]["benchmark"]["models"] = ["asam", "transformer", "local"]
+    _write_json(suite / "paper_suite_manifest.json", manifest)
+
+    summary = audit_paths([suite])
+
+    assert summary["suites"][0]["schema_provenance_rating"] == "OUTDATED"
+    assert any("long-context benchmark" in issue["message"] for issue in summary["blocking_issues"])
+
+
 def test_counts_raw_duplicate_json_files(tmp_path):
     suite = tmp_path / "experiments" / "paper_suite_raw"
     payload = {

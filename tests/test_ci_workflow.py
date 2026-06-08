@@ -47,6 +47,7 @@ def test_ci_workflow_runs_fast_gating_tests_not_full_suite():
     assert "tests/test_continual_ablation.py \\" not in workflow
     assert "tests/test_continual_asam.py \\" not in workflow
     assert "tests/test_experiment_artifact_audit.py" in workflow
+    assert "tests/test_paper_generate_figures.py" in workflow
     assert "tests/test_continual_real_benchmark.py" not in workflow
     assert "tests/test_continual_training.py" not in workflow
     assert "pytest tests/" not in workflow
@@ -59,6 +60,7 @@ def test_ci_workflow_installs_plotting_dependency_and_audits_artifacts():
     assert '".[dev,viz]"' in workflow
     assert "scripts/audit_experiment_artifacts.py" in workflow
     assert "experiments/paper_suite_canonical_smoke" in workflow
+    assert "experiments/paper_suite_long_context_smoke" in workflow
     assert "experiment_artifact_audit.json" in workflow
     assert (
         "scripts/audit_experiment_artifacts.py > experiment_artifact_audit.json || true"

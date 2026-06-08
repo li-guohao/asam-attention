@@ -31,7 +31,7 @@ def main():
         "target fraction",
         "clustering-based sorting",
         "distribution fitting",
-        "7.29x decode attention speedup"
+        "reported decode attention acceleration"
     ]
     
     for point in key_points:

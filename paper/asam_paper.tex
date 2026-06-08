@@ -220,7 +220,7 @@ We separate three evidence levels:
 \textbf{Evidence} & \textbf{Status} & \textbf{Claim allowed} \\
 \midrule
 LRA-style synthetic diagnostics & Not official LRA & Diagnostic only \\
-Long-context runtime sweep & Pending manifest & No speedup claim yet \\
+Long-context diagnostic smoke & Current manifest & Operator/runtime diagnostic only \\
 Continual canonical smoke & Current manifest & Pipeline and operator audit \\
 Historical continual suites & Outdated manifest & Not paper-facing \\
 \bottomrule
@@ -229,7 +229,7 @@ Historical continual suites & Outdated manifest & Not paper-facing \\
 
 \subsection{Long-Context Diagnostics}
 
-The long-context section is intentionally scoped as a diagnostic plan until new paper-facing artifacts are generated. The required suite compares ASAM, dense Transformer attention, local attention, and Longformer-style local/global attention across at least three sequence lengths. Reported metrics must include wall-clock time, peak memory, and task accuracy or diagnostic score. Existing LRA-like repository figures are not reported as official LRA because their current provenance does not meet the paper-facing audit gate.
+The current auditable long-context artifact is the CPU smoke suite in \texttt{experiments/paper\_suite\_long\_context\_smoke}. It compares ASAM, dense Transformer attention, local attention, and Longformer-style local/global attention across three sequence lengths and records wall-clock latency, peak memory, and finite-output diagnostic score in JSON, CSV, Markdown, and manifest files. This suite is an LRA-style synthetic operator/runtime diagnostic, not an official LRA result and not a hardware speedup claim. Existing historical synthetic diagnostic figures remain excluded because their provenance does not meet the paper-facing audit gate.
 
 \subsection{Continual Operator Ablation}
 
