@@ -49,6 +49,10 @@ def test_canonical_artifacts_exist():
         "r3_baseline_comparison.json",
         "continual_benchmark.json",
         "bootstrap_ci.json",
+        "r4_dbpedia_longstream.json",
+        "r4_cifar10_longstream.json",
+        "r4_dbpedia_baselines.json",
+        "r4_analysis.json",
     ]:
         assert (ARTIFACT_DIR / name).exists(), f"missing canonical artifact: {name}"
 
@@ -118,7 +122,37 @@ def test_abstract_matches_canonical_numbers():
     # The stitched two-experiment chain and the old overclaim must be gone.
     for stale in ["0.0625", "0.4844", "0.5156", "connect routing geometry diagnostics to forgetting"]:
         assert stale not in abstract_text, f"stale/stitched claim still in abstract: {stale}"
-    assert "left as future work" in abstract_text, "abstract should scope correlation analysis as future work"
+    assert (
+        "Sec.~\\ref{sec:longstream}" in abstract_text
+    ), "abstract should reference the long-stream correlation evidence"
+
+
+def test_table4_matches_longstream_analysis():
+    data = _load("r4_analysis.json")
+    tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
+    datasets = {item["artifact"]: item for item in data["datasets"]}
+
+    def agg(artifact, strategy):
+        return datasets[artifact]["aggregated"][strategy]
+
+    rows = [
+        ("r4_dbpedia_baselines.json", "fine_tune"),
+        ("r4_dbpedia_baselines.json", "ewc"),
+        ("r4_dbpedia_baselines.json", "er"),
+        ("r4_dbpedia_longstream.json", "no_adaptation"),
+        ("r4_dbpedia_notransport", "no_transport"),
+        ("r4_cifar10_longstream.json", "no_adaptation"),
+        ("r4_cifar10_notransport", "no_transport"),
+    ]
+    for artifact, strategy in rows:
+        row = agg(artifact, strategy)
+        _assert_pairs(
+            tex_clean,
+            [
+                (row["accuracy_mean"], row["accuracy_std"]),
+                (row["forgetting_mean"], row["forgetting_std"]),
+            ],
+        )
 
 
 def test_stale_unbacked_numbers_removed():

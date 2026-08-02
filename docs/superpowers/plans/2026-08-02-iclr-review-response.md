@@ -28,10 +28,17 @@
 - [x] 理论章节定位为"监控与诊断变量"；摘要/贡献列表/结论三处措辞一致性收尾
 ## Phase 3: 长任务流实验（结构性，完整实验周期；仅 D1-A 需要）
 **Files:** experiments/（新增 runner），experiments/paper_suite/r3_*（新产物）
-- [ ] Split AG News + Split CIFAR-10，T=5–10，class-incremental single-head（无 oracle id），每任务 64–256 样本
-- [ ] 展示诊断量（transport gap/excess/routing stability）在真实遗忘体制下随阶段的移动
-- [ ] 验证 no_transport 在更大规模下是否产生可测差异（回应"诊断无意义"攻击）
-- [ ] r3_* 产物接入守卫测试与 Reproducibility 清单
+- [x] Split AG News + Split CIFAR-10，T=5–10，class-incremental single-head（无 oracle id），每任务 64–256 样本
+- [x] 展示诊断量（transport gap/excess/routing stability）在真实遗忘体制下随阶段的移动
+- [x] 验证 no_transport 在更大规模下是否产生可测差异（回应"诊断无意义"攻击）
+- [x] r3_* 产物接入守卫测试与 Reproducibility 清单
+
+## Phase 3b（用户 2026-08-03 确认"冲 ICLR 主刊"后更新）
+可行性结论：AG News 仅 4 类（T≤4）；仓库无图像管线。调整为：
+- 文本长流：Split DBPedia-14（14 类，classes_per_task=2 → T=7），class-incremental single-head（global labels、单头、train oracle / eval none），每任务 128/64 样本、3 seeds、D=64/1L；策略：task_routing / no_adaptation / correlation / meta_secant / no_transport（传输项大尺度检验）。
+- 图像长流：新建 CIFAR-10 像素 token 管线（灰度 16×16 → 256 token、vocab 256，class_incremental_singlehead，T=5）。
+- 分析：阶段级 transport gap/excess/routing stability 与遗忘的相关性（T=7 每 run 6 个遗忘点 × 3 seeds）；no_transport vs sinkhorn 差异。
+- 产物：experiments/paper_suite/r4_dbpedia_*.json、r4_cifar10_*.json；接入守卫测试。
 ## Phase 4: 收尾与发布
 - [x] pdflatex 重编译（TinyTeX，16 页目标，无 undefined）
 - [x] 守卫 + 回归测试全绿（tests/test_paper_artifacts_consistency.py 等，70 passed）
