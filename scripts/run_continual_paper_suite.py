@@ -3,11 +3,15 @@ One-command paper-ready pipeline for continual ASAM experiments.
 """
 
 import argparse
+import hashlib
 import json
+import platform
+import subprocess
 import sys
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -15,6 +19,9 @@ from experiments.run_continual_operator_ablation import OperatorAblationArgs, ru
 from experiments.run_continual_text_ablation import AblationArgs, run_ablation
 from experiments.run_continual_text_benchmark import RealBenchmarkArgs, run_benchmark
 from scripts.sync_continual_appendix import build_continual_appendix, sync_paper_appendix
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SENSITIVE_ARG_MARKERS = ("token", "password", "secret", "key")
 
 
 @dataclass
@@ -86,12 +93,122 @@ CANDIDATE_PROFILES: Dict[str, Dict[str, object]] = {
 }
 
 
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _run_git_command(args: Iterable[str]) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return completed.stdout.strip() or "unknown"
+
+
+def collect_git_provenance() -> Dict[str, object]:
+    status = _run_git_command(["status", "--porcelain"])
+    return {
+        "commit": _run_git_command(["rev-parse", "HEAD"]),
+        "dirty": bool(status and status != "unknown"),
+        "status_porcelain": status if status != "unknown" else "",
+    }
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def collect_output_hashes(paths: Iterable[object]) -> Dict[str, str]:
+    hashes: Dict[str, str] = {}
+    for raw_path in paths:
+        if raw_path is None:
+            continue
+        path = Path(str(raw_path))
+        if path.exists() and path.is_file():
+            hashes[path.name] = _file_sha256(path)
+    return hashes
+
+
+def _is_sensitive_arg(arg: str) -> bool:
+    lowered = arg.lower().lstrip("-")
+    return any(marker in lowered for marker in SENSITIVE_ARG_MARKERS)
+
+
+def redact_argv(argv: Iterable[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    for raw_arg in argv:
+        arg = str(raw_arg)
+        if redact_next:
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        if "=" in arg:
+            key, _value = arg.split("=", 1)
+            if _is_sensitive_arg(key):
+                redacted.append(f"{key}=<redacted>")
+                continue
+        if _is_sensitive_arg(arg):
+            redacted.append(arg)
+            redact_next = True
+            continue
+        redacted.append(arg)
+    return redacted
+
+
+def build_manifest_provenance(
+    args: PipelineArgs,
+    started_at_utc: str,
+    finished_at_utc: str,
+    output_paths: Iterable[object],
+    git_provenance: Optional[Dict[str, object]] = None,
+) -> Dict[str, object]:
+    try:
+        import torch
+
+        torch_version = torch.__version__
+    except (ImportError, AttributeError):
+        torch_version = "unavailable"
+
+    return {
+        "argv": redact_argv(sys.argv),
+        "python_version": platform.python_version(),
+        "torch_version": torch_version,
+        "platform": platform.platform(),
+        "started_at_utc": started_at_utc,
+        "finished_at_utc": finished_at_utc,
+        "git": git_provenance or collect_git_provenance(),
+        "dataset": {
+            "name": args.dataset_name,
+            "classes_per_task": args.classes_per_task,
+            "max_train_samples": args.max_train_samples,
+            "max_val_samples": args.max_val_samples,
+            "seed": args.seed,
+            "num_seeds": args.num_seeds,
+        },
+        "device": args.device,
+        "output_hashes": collect_output_hashes(output_paths),
+    }
+
+
 def resolve_candidate_profile(args: PipelineArgs) -> Tuple[PipelineArgs, Dict[str, object]]:
     profile_name = str(args.candidate_profile).strip().lower()
     profile = CANDIDATE_PROFILES.get(profile_name)
     if profile is None:
         available = ", ".join(sorted(CANDIDATE_PROFILES))
-        raise ValueError(f"Unknown candidate_profile '{args.candidate_profile}'. Expected one of: {available}.")
+        raise ValueError(
+            f"Unknown candidate_profile '{args.candidate_profile}'. Expected one of: {available}."
+        )
 
     overrides = {"candidate_profile": profile_name}
     valid_fields = PipelineArgs.__dataclass_fields__
@@ -239,7 +356,9 @@ def build_pipeline_report(
     candidate_profile = manifest.get("candidate_profile", args.candidate_profile)
     profile_description = manifest.get("candidate_profile_description")
     resolved_num_prototypes = resolved_config.get("num_prototypes", args.num_prototypes)
-    resolved_slots_per_task = resolved_config.get("prototype_slots_per_task", args.prototype_slots_per_task)
+    resolved_slots_per_task = resolved_config.get(
+        "prototype_slots_per_task", args.prototype_slots_per_task
+    )
     resolved_top_k = resolved_config.get("prototype_top_k", args.prototype_top_k)
     resolved_transport_weight = resolved_config.get("transport_weight", args.transport_weight)
     prototype_layout = (
@@ -363,7 +482,9 @@ def export_appendix_artifacts(
 
 
 def run_pipeline(args: PipelineArgs) -> Dict[str, object]:
+    started_at_utc = _utc_timestamp()
     resolved_args, profile = resolve_candidate_profile(args)
+    git_provenance = collect_git_provenance()
     output_dir = Path(resolved_args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -375,7 +496,9 @@ def run_pipeline(args: PipelineArgs) -> Dict[str, object]:
 
     benchmark_results = run_benchmark(build_benchmark_args(resolved_args, str(benchmark_json)))
     ablation_results = run_ablation(build_ablation_args(resolved_args, str(ablation_json)))
-    operator_ablation_results = run_operator_ablation(build_operator_ablation_args(resolved_args, str(operator_ablation_json)))
+    operator_ablation_results = run_operator_ablation(
+        build_operator_ablation_args(resolved_args, str(operator_ablation_json))
+    )
 
     manifest = {
         "config": asdict(args),
@@ -406,9 +529,36 @@ def run_pipeline(args: PipelineArgs) -> Dict[str, object]:
             manifest,
         )
     )
+    finished_at_utc = _utc_timestamp()
+    manifest["provenance"] = build_manifest_provenance(
+        resolved_args,
+        started_at_utc,
+        finished_at_utc,
+        [
+            benchmark_json,
+            benchmark_results.get("plot_path"),
+            benchmark_results.get("report_path"),
+            ablation_json,
+            ablation_results.get("table_path"),
+            ablation_results.get("csv_path"),
+            ablation_results.get("plot_path"),
+            ablation_results.get("report_path"),
+            operator_ablation_json,
+            operator_ablation_results.get("table_path"),
+            operator_ablation_results.get("csv_path"),
+            operator_ablation_results.get("plot_path"),
+            operator_ablation_results.get("report_path"),
+            manifest.get("paper_tex"),
+            manifest.get("synced_paper_tex"),
+            manifest.get("appendix_only_tex"),
+        ],
+        git_provenance,
+    )
     suite_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     suite_report.write_text(
-        build_pipeline_report(resolved_args, benchmark_results, ablation_results, operator_ablation_results, manifest),
+        build_pipeline_report(
+            resolved_args, benchmark_results, ablation_results, operator_ablation_results, manifest
+        ),
         encoding="utf-8",
     )
 
@@ -423,7 +573,9 @@ def run_pipeline(args: PipelineArgs) -> Dict[str, object]:
 
 
 def parse_args() -> PipelineArgs:
-    parser = argparse.ArgumentParser(description="Run the one-command paper-ready continual ASAM suite")
+    parser = argparse.ArgumentParser(
+        description="Run the one-command paper-ready continual ASAM suite"
+    )
     for field_name, field_def in PipelineArgs.__dataclass_fields__.items():
         arg_name = f"--{field_name.replace('_', '-')}"
         default_value = field_def.default

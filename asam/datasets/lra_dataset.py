@@ -12,19 +12,19 @@ Transformers." ICLR 2021.
 
 from __future__ import annotations
 
-import torch
-from torch.utils.data import Dataset, DataLoader
 from dataclasses import dataclass
-from typing import Dict, Tuple, List
-import numpy as np
+from typing import Dict, List, Tuple
 
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Dataset
 
 LRA_TASKS: Dict[str, dict] = {
-    "listops":    {"seq_len": 2048, "num_classes": 10, "vocab_size": 20},
-    "text":       {"seq_len": 4096, "num_classes": 2,  "vocab_size": 256},
-    "retrieval":  {"seq_len": 4096, "num_classes": 2,  "vocab_size": 128},
-    "image":      {"seq_len": 1024, "num_classes": 10, "vocab_size": 256},
-    "pathfinder": {"seq_len": 1024, "num_classes": 2,  "vocab_size": 256},
+    "listops": {"seq_len": 2048, "num_classes": 10, "vocab_size": 20},
+    "text": {"seq_len": 4096, "num_classes": 2, "vocab_size": 256},
+    "retrieval": {"seq_len": 4096, "num_classes": 2, "vocab_size": 128},
+    "image": {"seq_len": 1024, "num_classes": 10, "vocab_size": 256},
+    "pathfinder": {"seq_len": 1024, "num_classes": 2, "vocab_size": 256},
 }
 
 
@@ -41,8 +41,7 @@ class LRAConfig:
         task_info = LRA_TASKS[self.task]
         if self.seq_len != task_info["seq_len"]:
             raise ValueError(
-                f"Task '{self.task}' expects seq_len={task_info['seq_len']}, "
-                f"got {self.seq_len}"
+                f"Task '{self.task}' expects seq_len={task_info['seq_len']}, " f"got {self.seq_len}"
             )
 
 
@@ -95,7 +94,7 @@ class LRADataset(Dataset):
 
             # Pad/truncate to seq_len
             if len(tokens) > self.seq_len:
-                tokens = tokens[:self.seq_len]
+                tokens = tokens[: self.seq_len]
             else:
                 tokens = tokens + [0] * (self.seq_len - len(tokens))
 
@@ -156,7 +155,7 @@ class LRADataset(Dataset):
                     pos += 1
 
             # Truncate/pad
-            tokens = tokens[:self.seq_len]
+            tokens = tokens[: self.seq_len]
             if len(tokens) < self.seq_len:
                 tokens.extend([0] * (self.seq_len - len(tokens)))
 
@@ -181,10 +180,12 @@ class LRADataset(Dataset):
             overlap = len(set(doc1[:100]) & set(doc2[:100]))
             label = 1 if overlap > 20 else 0
 
-            data.append((
-                (torch.tensor(doc1, dtype=torch.long), torch.tensor(doc2, dtype=torch.long)),
-                label,
-            ))
+            data.append(
+                (
+                    (torch.tensor(doc1, dtype=torch.long), torch.tensor(doc2, dtype=torch.long)),
+                    label,
+                )
+            )
 
         return data
 
@@ -299,8 +300,8 @@ def create_lra_dataloaders(
 
     configs = {
         "train": LRAConfig(task=task, seq_len=task_info["seq_len"], num_samples=train_samples),
-        "val":   LRAConfig(task=task, seq_len=task_info["seq_len"], num_samples=train_samples),
-        "test":  LRAConfig(task=task, seq_len=task_info["seq_len"], num_samples=train_samples),
+        "val": LRAConfig(task=task, seq_len=task_info["seq_len"], num_samples=train_samples),
+        "test": LRAConfig(task=task, seq_len=task_info["seq_len"], num_samples=train_samples),
     }
 
     dataloaders = {}

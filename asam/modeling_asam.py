@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-from typing import Optional, Dict, Tuple
-
 from transformers import PretrainedConfig, PreTrainedModel
-from transformers.modeling_outputs import (
-    BaseModelOutputWithPast,
-    SequenceClassifierOutput,
-)
+from transformers.modeling_outputs import BaseModelOutputWithPast, SequenceClassifierOutput
 
-from .asam_layer import ASAMConfig, ASAMLayer, ASAMEncoder
+from .asam_layer import ASAMConfig, ASAMEncoder, ASAMLayer
 
 
 class ASAMHFConfig(PretrainedConfig):
@@ -98,9 +95,7 @@ class ASAMHFModel(PreTrainedModel):
         self.token_embedding = nn.Embedding(
             config.vocab_size, config.dim, padding_idx=config.pad_token_id
         )
-        self.position_embedding = nn.Embedding(
-            config.max_position_embeddings, config.dim
-        )
+        self.position_embedding = nn.Embedding(config.max_position_embeddings, config.dim)
         self.embed_dropout = nn.Dropout(config.dropout)
 
         self.encoder = ASAMEncoder(asam_config, num_layers=config.num_layers)
@@ -185,6 +180,4 @@ class ASAMHFForSequenceClassification(PreTrainedModel):
 # Register with HuggingFace auto classes
 ASAMHFConfig.register_for_auto_class()
 ASAMHFModel.register_for_auto_class("AutoModel")
-ASAMHFForSequenceClassification.register_for_auto_class(
-    "AutoModelForSequenceClassification"
-)
+ASAMHFForSequenceClassification.register_for_auto_class("AutoModelForSequenceClassification")

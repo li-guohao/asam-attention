@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 def export_to_onnx(
@@ -96,8 +97,7 @@ def verify_onnx_export(
         import onnxruntime as ort
     except ImportError:
         raise ImportError(
-            "onnxruntime is required for verification. "
-            "Install with: pip install onnxruntime"
+            "onnxruntime is required for verification. " "Install with: pip install onnxruntime"
         )
 
     # PyTorch output
@@ -109,14 +109,10 @@ def verify_onnx_export(
 
     # ONNX output
     session = ort.InferenceSession(onnx_path)
-    onnx_output = session.run(
-        None, {"x": sample_input.cpu().numpy()}
-    )[0]
+    onnx_output = session.run(None, {"x": sample_input.cpu().numpy()})[0]
 
     pytorch_np = pytorch_output.cpu().numpy()
-    match = (
-        abs(pytorch_np - onnx_output).max() < atol
-    )
+    match = abs(pytorch_np - onnx_output).max() < atol
 
     if not match:
         max_diff = abs(pytorch_np - onnx_output).max()

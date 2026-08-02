@@ -12,11 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ._common import expand_pattern_mask, normalize_attention_mask, pattern_mask_to_indices
 from .asam_layer import ASAMConfig, ASAMLayer
-from ._common import (
-    expand_pattern_mask,
-    pattern_mask_to_indices,
-)
 from .sparse_patterns import (
     HierarchicalSparsePattern,
     LocalSparsePattern,
@@ -47,6 +44,8 @@ class ContinualASAMConfig(ASAMConfig):
     prototype_sinkhorn_epsilon: float = 0.1
     prototype_sinkhorn_iters: int = 20
     prototype_capacity_blend: float = 0.5
+    prototype_masked_sinkhorn_candidate_k: int = 0
+    prototype_masked_sinkhorn_capacity_bias: float = 0.0
     prototype_relocation_strength: float = 0.75
     prototype_balance_weight: float = 0.0
     prototype_diversity_weight: float = 0.0
@@ -66,6 +65,8 @@ class ContinualASAMConfig(ASAMConfig):
     prototype_birkhoff_epsilon: float = 0.25
     prototype_birkhoff_diag_bias: float = 4.0
     prototype_birkhoff_gap_weight: float = 4.0
+    grouped_indexed_attention: bool = True
+    grouped_indexed_attention_max_group_size: int = 1
 
 
 class TaskAwareSparseGate(nn.Module):
@@ -129,6 +130,8 @@ class PrototypeSparseGate(nn.Module):
         sinkhorn_epsilon: float = 0.1,
         sinkhorn_iters: int = 20,
         capacity_blend: float = 0.5,
+        masked_sinkhorn_candidate_k: int = 0,
+        masked_sinkhorn_capacity_bias: float = 0.0,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -142,9 +145,13 @@ class PrototypeSparseGate(nn.Module):
         self.sinkhorn_epsilon = sinkhorn_epsilon
         self.sinkhorn_iters = sinkhorn_iters
         self.capacity_blend = capacity_blend
+        self.masked_sinkhorn_candidate_k = masked_sinkhorn_candidate_k
+        self.masked_sinkhorn_capacity_bias = masked_sinkhorn_capacity_bias
 
         self.input_proj = nn.Linear(dim, prototype_embed_dim)
-        self.prototype_embeddings = nn.Parameter(torch.randn(num_prototypes, prototype_embed_dim) * 0.02)
+        self.prototype_embeddings = nn.Parameter(
+            torch.randn(num_prototypes, prototype_embed_dim) * 0.02
+        )
         self.feature_proj = nn.Sequential(
             nn.Linear(dim + prototype_embed_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -170,7 +177,7 @@ class PrototypeSparseGate(nn.Module):
         elif routing_prior.dim() == 1:
             routing_prior = routing_prior.unsqueeze(0).expand(batch_size, -1)
         elif routing_prior.dim() != 2 or routing_prior.size(0) != batch_size:
-            raise ValueError('routing_prior must have shape [batch, num_prototypes]')
+            raise ValueError("routing_prior must have shape [batch, num_prototypes]")
 
         routing_prior = routing_prior.to(device=device, dtype=dtype)
         routing_prior = routing_prior.clamp_min(self.prior_floor)
@@ -183,7 +190,7 @@ class PrototypeSparseGate(nn.Module):
             return F.softmax(logits, dim=-1), support
 
         top_values, top_indices = logits.topk(k=top_k, dim=-1)
-        sparse_logits = torch.full_like(logits, float('-inf'))
+        sparse_logits = torch.full_like(logits, float("-inf"))
         sparse_logits.scatter_(dim=-1, index=top_indices, src=top_values)
 
         support = torch.zeros_like(logits, dtype=torch.bool)
@@ -224,6 +231,23 @@ class PrototypeSparseGate(nn.Module):
         target = blend * average_prior + (1.0 - blend) * uniform
         return target / target.sum().clamp_min(1e-6)
 
+    def _project_capacity_to_support(
+        self,
+        target_capacity: torch.Tensor,
+        support: torch.Tensor,
+    ) -> torch.Tensor:
+        support_weights = support.to(dtype=target_capacity.dtype)
+        target_on_support = support_weights * target_capacity.unsqueeze(0)
+        row_target_mass = target_on_support.sum(dim=-1, keepdim=True)
+        fallback = support_weights / support_weights.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        row_distribution = torch.where(
+            row_target_mass > 1e-6,
+            target_on_support / row_target_mass.clamp_min(1e-6),
+            fallback,
+        )
+        capacity = row_distribution.mean(dim=0)
+        return capacity / capacity.sum().clamp_min(1e-6)
+
     def _sinkhorn_transport_weights(
         self,
         logits: torch.Tensor,
@@ -259,6 +283,210 @@ class PrototypeSparseGate(nn.Module):
         sparse_weights, support = self._topk_project_probabilities(dense_weights)
         return sparse_weights, support, target_capacity
 
+    def _topk_support_from_scores(
+        self,
+        scores: torch.Tensor,
+    ) -> torch.Tensor:
+        candidate_k = int(self.masked_sinkhorn_candidate_k)
+        if candidate_k <= 0:
+            candidate_k = self.top_k
+        candidate_k = min(max(1, candidate_k), scores.size(-1))
+        if candidate_k >= scores.size(-1):
+            return torch.ones_like(scores, dtype=torch.bool)
+
+        _, top_indices = scores.topk(k=candidate_k, dim=-1)
+        support = torch.zeros_like(scores, dtype=torch.bool)
+        support.scatter_(
+            dim=-1,
+            index=top_indices,
+            src=torch.ones(top_indices.shape, device=scores.device, dtype=torch.bool),
+        )
+        return support
+
+    def _build_masked_sinkhorn_support(
+        self,
+        logits: torch.Tensor,
+    ) -> torch.Tensor:
+        return self._topk_support_from_scores(logits)
+
+    def _select_masked_sinkhorn_support(
+        self,
+        logits: torch.Tensor,
+        target_capacity: torch.Tensor,
+        return_selection: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
+        baseline_support = self._build_masked_sinkhorn_support(logits)
+        baseline_capacity = self._project_capacity_to_support(target_capacity, baseline_support)
+        beta = float(self.masked_sinkhorn_capacity_bias)
+        if beta <= 0.0:
+            result = (baseline_support, baseline_capacity, False)
+            return result if return_selection else result[:2]
+
+        capacity_scores = logits + beta * torch.log(
+            target_capacity.to(device=logits.device, dtype=logits.dtype).clamp_min(self.prior_floor)
+        ).unsqueeze(0)
+        biased_support = self._topk_support_from_scores(capacity_scores)
+        biased_capacity = self._project_capacity_to_support(target_capacity, biased_support)
+
+        baseline_residual = (baseline_capacity - target_capacity).abs().sum()
+        biased_residual = (biased_capacity - target_capacity).abs().sum()
+        if biased_residual.item() < baseline_residual.item():
+            result = (biased_support, biased_capacity, True)
+            return result if return_selection else result[:2]
+        result = (baseline_support, baseline_capacity, False)
+        return result if return_selection else result[:2]
+
+    def _build_support_diagnostics(
+        self,
+        logits: torch.Tensor,
+        target_capacity: torch.Tensor,
+        prototype_weights: torch.Tensor,
+        prototype_support: torch.Tensor,
+        prototype_capacity: torch.Tensor,
+        candidate_support: torch.Tensor,
+        proposal_weights: Optional[torch.Tensor] = None,
+        biased_support_selected: bool = False,
+    ) -> Dict[str, torch.Tensor]:
+        with torch.no_grad():
+            diagnostic_weights = prototype_weights.detach()
+            target_capacity = target_capacity.detach().to(
+                device=diagnostic_weights.device, dtype=diagnostic_weights.dtype
+            )
+            prototype_capacity = prototype_capacity.detach().to(
+                device=diagnostic_weights.device,
+                dtype=diagnostic_weights.dtype,
+            )
+            candidate_support = candidate_support.detach().to(device=diagnostic_weights.device)
+            prototype_support = prototype_support.detach().to(device=diagnostic_weights.device)
+            candidate_capacity = self._project_capacity_to_support(
+                target_capacity, candidate_support
+            )
+            support_capacity = self._project_capacity_to_support(target_capacity, prototype_support)
+            candidate_residual = (candidate_capacity - target_capacity).abs().mean()
+            support_residual = (support_capacity - target_capacity).abs().mean()
+            mean_weights = diagnostic_weights.mean(dim=0)
+            leakage_weights = (
+                diagnostic_weights
+                if proposal_weights is None
+                else proposal_weights.detach().to(
+                    device=diagnostic_weights.device,
+                    dtype=diagnostic_weights.dtype,
+                )
+            )
+            return {
+                "prototype_target_capacity": target_capacity.detach(),
+                "candidate_support_residual": candidate_residual.detach(),
+                "support_projection_residual": support_residual.detach(),
+                "support_residual_delta": (candidate_residual - support_residual).detach(),
+                "target_capacity_residual": (mean_weights - target_capacity).abs().mean().detach(),
+                "effective_capacity_residual": (mean_weights - prototype_capacity)
+                .abs()
+                .mean()
+                .detach(),
+                "support_density": prototype_support.float().mean().detach(),
+                "support_size": prototype_support.float().sum(dim=-1).mean().detach(),
+                "support_active_prototypes": prototype_support.any(dim=0).float().sum().detach(),
+                "support_weight_leakage": leakage_weights.masked_select(~prototype_support)
+                .abs()
+                .sum()
+                .detach(),
+                "capacity_bias_selection_rate": diagnostic_weights.new_tensor(
+                    1.0 if biased_support_selected else 0.0
+                ).detach(),
+            }
+
+    def _masked_sinkhorn_transport_weights(
+        self,
+        logits: torch.Tensor,
+        target_capacity: torch.Tensor,
+        support: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size = logits.size(0)
+        row_mass = torch.full(
+            (batch_size,),
+            1.0 / batch_size,
+            device=logits.device,
+            dtype=logits.dtype,
+        )
+        col_mass = target_capacity.to(device=logits.device, dtype=logits.dtype)
+        col_mass = col_mass / col_mass.sum().clamp_min(1e-6)
+
+        scaled_logits = logits / max(self.sinkhorn_epsilon, 1e-6)
+        scaled_logits = scaled_logits.masked_fill(~support, float("-inf"))
+        row_max = scaled_logits.max(dim=-1, keepdim=True).values
+        row_max = torch.where(torch.isfinite(row_max), row_max, torch.zeros_like(row_max))
+        kernel = torch.exp(scaled_logits - row_max).masked_fill(~support, 0.0)
+        kernel = kernel.clamp_min(0.0)
+
+        u = torch.ones_like(row_mass)
+        v = torch.ones_like(col_mass)
+        for _ in range(max(1, self.sinkhorn_iters)):
+            u = row_mass / torch.matmul(kernel, v).clamp_min(1e-9)
+            v = col_mass / torch.matmul(kernel.transpose(0, 1), u).clamp_min(1e-9)
+
+        transport = u.unsqueeze(-1) * kernel * v.unsqueeze(0)
+        weights = transport / transport.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        weights = weights.masked_fill(~support, 0.0)
+        return weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+
+    def _route_with_masked_sinkhorn(
+        self,
+        logits: torch.Tensor,
+        routing_prior: torch.Tensor,
+        return_diagnostics: bool = False,
+    ) -> Tuple[torch.Tensor, ...]:
+        target_capacity = self._build_capacity_target(routing_prior)
+        candidate_support = self._build_masked_sinkhorn_support(logits)
+        candidate_k = int(self.masked_sinkhorn_candidate_k)
+        if candidate_k <= 0:
+            candidate_k = self.top_k
+        if min(max(1, candidate_k), logits.size(-1)) >= logits.size(-1):
+            weights, support, effective_capacity = self._route_with_sinkhorn(logits, routing_prior)
+            if not return_diagnostics:
+                return weights, support, effective_capacity
+            proposal_weights = self._sinkhorn_transport_weights(
+                logits.detach(), target_capacity.detach()
+            )
+            diagnostics = self._build_support_diagnostics(
+                logits=logits,
+                target_capacity=target_capacity,
+                prototype_weights=weights,
+                prototype_support=support,
+                prototype_capacity=effective_capacity,
+                candidate_support=candidate_support,
+                proposal_weights=proposal_weights,
+                biased_support_selected=False,
+            )
+            return weights, support, effective_capacity, diagnostics
+
+        support, effective_capacity, biased_support_selected = self._select_masked_sinkhorn_support(
+            logits,
+            target_capacity,
+            return_selection=True,
+        )
+
+        weights = self._masked_sinkhorn_transport_weights(
+            logits=logits,
+            target_capacity=effective_capacity,
+            support=support,
+        )
+        if not return_diagnostics:
+            return weights, support, effective_capacity
+        proposal_weights = self._sinkhorn_transport_weights(
+            logits.detach(), target_capacity.detach()
+        )
+        diagnostics = self._build_support_diagnostics(
+            logits=logits,
+            target_capacity=target_capacity,
+            prototype_weights=weights,
+            prototype_support=support,
+            prototype_capacity=effective_capacity,
+            candidate_support=candidate_support,
+            proposal_weights=proposal_weights,
+            biased_support_selected=biased_support_selected,
+        )
+        return weights, support, effective_capacity, diagnostics
+
     def forward(
         self,
         x: torch.Tensor,
@@ -284,9 +512,42 @@ class PrototypeSparseGate(nn.Module):
                 proximal_logits,
                 routing_prior,
             )
+            proposal_weights = self._sinkhorn_transport_weights(
+                proximal_logits.detach(),
+                self._build_capacity_target(routing_prior).detach(),
+            )
+            support_diagnostics = self._build_support_diagnostics(
+                logits=proximal_logits,
+                target_capacity=self._build_capacity_target(routing_prior),
+                prototype_weights=prototype_weights,
+                prototype_support=prototype_support,
+                prototype_capacity=prototype_capacity,
+                candidate_support=self._build_masked_sinkhorn_support(proximal_logits),
+                proposal_weights=proposal_weights,
+                biased_support_selected=False,
+            )
+        elif self.routing_strategy == "masked_sinkhorn_topk":
+            prototype_weights, prototype_support, prototype_capacity, support_diagnostics = (
+                self._route_with_masked_sinkhorn(
+                    proximal_logits,
+                    routing_prior,
+                    return_diagnostics=True,
+                )
+            )
         elif self.routing_strategy == "kl_topk":
             prototype_weights, prototype_support = self._topk_sparse_softmax(proximal_logits)
             prototype_capacity = routing_prior.mean(dim=0)
+            proposal_weights = F.softmax(proximal_logits, dim=-1)
+            support_diagnostics = self._build_support_diagnostics(
+                logits=proximal_logits,
+                target_capacity=self._build_capacity_target(routing_prior),
+                prototype_weights=prototype_weights,
+                prototype_support=prototype_support,
+                prototype_capacity=prototype_capacity,
+                candidate_support=self._build_masked_sinkhorn_support(proximal_logits),
+                proposal_weights=proposal_weights,
+                biased_support_selected=False,
+            )
         else:
             raise ValueError(f"Unsupported routing strategy: {self.routing_strategy}")
 
@@ -308,6 +569,7 @@ class PrototypeSparseGate(nn.Module):
             "pattern_logits": pattern_logits,
             "pattern_weights": pattern_weights,
             "head_importance": head_importance,
+            **support_diagnostics,
         }
 
 
@@ -384,15 +646,149 @@ class ContinualASAMLayer(ASAMLayer):
         seq_len: int,
         device: torch.device,
     ) -> torch.Tensor:
-        base_masks = self._get_base_pattern_masks(seq_len, device)
         top_k = min(self.continual_config.top_k_patterns, len(self.pattern_bank))
         top_indices = pattern_logits.topk(k=top_k, dim=-1).indices
+        return self._build_pattern_mask_from_indices(top_indices, seq_len, device)
 
+    def _build_pattern_mask_from_indices(
+        self,
+        top_indices: torch.Tensor,
+        seq_len: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        base_masks = self._get_base_pattern_masks(seq_len, device)
         selected_masks = []
         for head_index in range(self.num_heads):
             head_masks = base_masks[top_indices[head_index], head_index]
             selected_masks.append(head_masks.any(dim=0))
         return torch.stack(selected_masks, dim=0)
+
+    def _compute_legacy_pattern_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pattern_logits: torch.Tensor,
+        seq_len: int,
+        device: torch.device,
+        normalized_mask: Optional[torch.Tensor] = None,
+        return_pattern_masks: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        outputs = []
+        pattern_masks = []
+        batch = q.size(0)
+        for batch_index in range(batch):
+            pattern_mask = self._build_task_pattern_mask(
+                pattern_logits[batch_index],
+                seq_len,
+                device,
+            )
+            if return_pattern_masks:
+                pattern_masks.append(pattern_mask)
+
+            positions, valid_mask = pattern_mask_to_indices(pattern_mask)
+            sample_mask = (
+                None if normalized_mask is None else normalized_mask[batch_index : batch_index + 1]
+            )
+            sample_out = self._compute_sparse_attention_from_indices(
+                q[batch_index : batch_index + 1],
+                k[batch_index : batch_index + 1],
+                v[batch_index : batch_index + 1],
+                positions,
+                valid_mask,
+                mask=sample_mask,
+            )
+            outputs.append(sample_out)
+
+        stacked_masks = torch.stack(pattern_masks, dim=0) if return_pattern_masks else None
+        return torch.cat(outputs, dim=0), stacked_masks
+
+    def _compute_grouped_pattern_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pattern_logits: torch.Tensor,
+        seq_len: int,
+        device: torch.device,
+        normalized_mask: Optional[torch.Tensor] = None,
+        return_pattern_masks: bool = False,
+        group_hint_ids: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        if not bool(self.continual_config.grouped_indexed_attention):
+            return self._compute_legacy_pattern_attention(
+                q,
+                k,
+                v,
+                pattern_logits,
+                seq_len,
+                device,
+                normalized_mask=normalized_mask,
+                return_pattern_masks=return_pattern_masks,
+            )
+        if group_hint_ids is not None and group_hint_ids.numel() == q.size(0):
+            if group_hint_ids.unique().numel() == q.size(0):
+                return self._compute_legacy_pattern_attention(
+                    q,
+                    k,
+                    v,
+                    pattern_logits,
+                    seq_len,
+                    device,
+                    normalized_mask=normalized_mask,
+                    return_pattern_masks=return_pattern_masks,
+                )
+
+        top_k = min(self.continual_config.top_k_patterns, len(self.pattern_bank))
+        selected_patterns = pattern_logits.topk(k=top_k, dim=-1).indices
+        canonical_patterns = torch.sort(selected_patterns, dim=-1).values.reshape(q.size(0), -1)
+        _, group_ids = torch.unique(canonical_patterns, dim=0, return_inverse=True)
+        num_groups = int(group_ids.max().item()) + 1
+        if num_groups == q.size(0):
+            return self._compute_legacy_pattern_attention(
+                q,
+                k,
+                v,
+                pattern_logits,
+                seq_len,
+                device,
+                normalized_mask=normalized_mask,
+                return_pattern_masks=return_pattern_masks,
+            )
+
+        outputs = [None] * q.size(0)
+        pattern_masks = [None] * q.size(0) if return_pattern_masks else None
+        for group_id in range(num_groups):
+            group_index_tensor = torch.nonzero(group_ids == group_id, as_tuple=False).squeeze(-1)
+            group_indices = group_index_tensor.tolist()
+            first_index = group_indices[0]
+            top_indices = selected_patterns[first_index]
+            pattern_mask = self._build_pattern_mask_from_indices(top_indices, seq_len, device)
+            positions, valid_mask = pattern_mask_to_indices(pattern_mask)
+            max_group_size = int(self.continual_config.grouped_indexed_attention_max_group_size)
+            chunk_size = len(group_indices) if max_group_size <= 0 else max(1, max_group_size)
+            for chunk_start in range(0, len(group_indices), chunk_size):
+                chunk_indices = group_indices[chunk_start : chunk_start + chunk_size]
+                chunk_index_tensor = torch.tensor(chunk_indices, device=q.device, dtype=torch.long)
+                group_mask = None
+                if normalized_mask is not None:
+                    group_mask = normalized_mask.index_select(0, chunk_index_tensor)
+                group_out = self._compute_sparse_attention_from_indices(
+                    q.index_select(0, chunk_index_tensor),
+                    k.index_select(0, chunk_index_tensor),
+                    v.index_select(0, chunk_index_tensor),
+                    positions,
+                    valid_mask,
+                    mask=group_mask,
+                )
+                for offset, batch_index in enumerate(chunk_indices):
+                    outputs[batch_index] = group_out[offset : offset + 1]
+                    if pattern_masks is not None:
+                        pattern_masks[batch_index] = pattern_mask
+
+        attn_out = torch.cat(outputs, dim=0)
+        stacked_masks = torch.stack(pattern_masks, dim=0) if pattern_masks is not None else None
+        return attn_out, stacked_masks
 
     def _effective_support_scores(
         self,
@@ -419,7 +815,9 @@ class ContinualASAMLayer(ASAMLayer):
         for left in range(batch):
             for right in range(left + 1, batch):
                 if task_ids[left] != task_ids[right]:
-                    overlap_terms.append((effective_support[left] * effective_support[right]).mean())
+                    overlap_terms.append(
+                        (effective_support[left] * effective_support[right]).mean()
+                    )
 
         remembered_task_ids = torch.nonzero(self.task_memory_seen, as_tuple=False).squeeze(-1)
         for batch_index in range(batch):
@@ -428,7 +826,9 @@ class ContinualASAMLayer(ASAMLayer):
                 continue
 
             remembered_pattern_weights = self.task_pattern_memory[other_task_ids]
-            remembered_support = torch.einsum("thp,phij->thij", remembered_pattern_weights, base_masks)
+            remembered_support = torch.einsum(
+                "thp,phij->thij", remembered_pattern_weights, base_masks
+            )
             current_support = effective_support[batch_index].unsqueeze(0)
             overlap_terms.append((current_support * remembered_support).mean())
 
@@ -500,38 +900,28 @@ class ContinualASAMLayer(ASAMLayer):
 
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = map(
-            lambda tensor: tensor.reshape(batch, seq_len, self.num_heads, self.dim_head).transpose(1, 2),
+            lambda tensor: tensor.reshape(batch, seq_len, self.num_heads, self.dim_head).transpose(
+                1, 2
+            ),
             qkv,
         )
         q = q * self.scale
 
         normalized_mask = None
         if mask is not None:
-            normalized_mask = self._normalize_attention_mask(mask, batch, self.num_heads, seq_len)
+            normalized_mask = normalize_attention_mask(mask, batch, self.num_heads, seq_len)
 
-        outputs = []
-        task_pattern_masks = []
-        for batch_index in range(batch):
-            task_pattern_mask = self._build_task_pattern_mask(
-                gate_info["pattern_logits"][batch_index],
-                seq_len,
-                x.device,
-            )
-            task_pattern_masks.append(task_pattern_mask)
-
-            positions, valid_mask = pattern_mask_to_indices(task_pattern_mask)
-            sample_mask = None if normalized_mask is None else normalized_mask[batch_index : batch_index + 1]
-            sample_out = self._compute_sparse_attention_from_indices(
-                q[batch_index : batch_index + 1],
-                k[batch_index : batch_index + 1],
-                v[batch_index : batch_index + 1],
-                positions,
-                valid_mask,
-                mask=sample_mask,
-            )
-            outputs.append(sample_out)
-
-        attn_out = torch.cat(outputs, dim=0)
+        attn_out, task_pattern_masks = self._compute_grouped_pattern_attention(
+            q,
+            k,
+            v,
+            gate_info["pattern_logits"],
+            seq_len,
+            x.device,
+            normalized_mask=normalized_mask,
+            return_pattern_masks=return_info,
+            group_hint_ids=task_ids,
+        )
         attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, dim)
         attn_out = self.to_out(attn_out)
 
@@ -552,17 +942,21 @@ class ContinualASAMLayer(ASAMLayer):
             seq_len=seq_len,
             device=x.device,
         )
-        selected_patterns = gate_info["pattern_logits"].topk(
-            k=min(self.continual_config.top_k_patterns, len(self.pattern_bank)),
-            dim=-1,
-        ).indices
+        selected_patterns = (
+            gate_info["pattern_logits"]
+            .topk(
+                k=min(self.continual_config.top_k_patterns, len(self.pattern_bank)),
+                dim=-1,
+            )
+            .indices
+        )
 
         info = {
             "pattern_logits": gate_info["pattern_logits"],
             "pattern_weights": gate_info["pattern_weights"],
             "head_importance": gate_info["head_importance"],
             "selected_patterns": selected_patterns,
-            "task_pattern_masks": torch.stack(task_pattern_masks, dim=0),
+            "task_pattern_masks": task_pattern_masks,
             **regularization,
         }
         return x, info
@@ -588,13 +982,19 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             sinkhorn_epsilon=config.prototype_sinkhorn_epsilon,
             sinkhorn_iters=config.prototype_sinkhorn_iters,
             capacity_blend=config.prototype_capacity_blend,
+            masked_sinkhorn_candidate_k=config.prototype_masked_sinkhorn_candidate_k,
+            masked_sinkhorn_capacity_bias=config.prototype_masked_sinkhorn_capacity_bias,
         )
-        self.register_buffer("prototype_head_memory", torch.zeros(config.num_prototypes, config.num_heads))
+        self.register_buffer(
+            "prototype_head_memory", torch.zeros(config.num_prototypes, config.num_heads)
+        )
         self.register_buffer(
             "prototype_pattern_memory",
             torch.zeros(config.num_prototypes, config.num_heads, len(self.pattern_bank)),
         )
-        self.register_buffer("prototype_memory_seen", torch.zeros(config.num_prototypes, dtype=torch.bool))
+        self.register_buffer(
+            "prototype_memory_seen", torch.zeros(config.num_prototypes, dtype=torch.bool)
+        )
         self.register_buffer("prototype_usage_ema", torch.zeros(config.num_prototypes))
         self.register_buffer("prototype_capacity_ema", torch.zeros(config.num_prototypes))
         self.register_buffer("prototype_support_ema", torch.zeros(config.num_prototypes))
@@ -649,7 +1049,9 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         if task_ids.dim() != 1 or task_ids.size(0) != batch_size:
             raise ValueError("task_ids must be a tensor of shape [batch] for prototype routing")
 
-        clamped_task_ids = task_ids.to(device=device).long().clamp(min=0, max=self.continual_config.num_tasks - 1)
+        clamped_task_ids = (
+            task_ids.to(device=device).long().clamp(min=0, max=self.continual_config.num_tasks - 1)
+        )
         task_seen = self.task_prototype_seen[clamped_task_ids].to(device=device)
         if not task_seen.any():
             return global_prior
@@ -659,7 +1061,11 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         task_prior = task_prior / task_prior.sum(dim=-1, keepdim=True).clamp_min(1e-6)
         task_prior = torch.where(task_seen.unsqueeze(-1), task_prior, global_prior)
 
-        task_weights = self.task_transport_weights[clamped_task_ids].to(device=device, dtype=dtype).clamp_min(0.0)
+        task_weights = (
+            self.task_transport_weights[clamped_task_ids]
+            .to(device=device, dtype=dtype)
+            .clamp_min(0.0)
+        )
         base_weight = max(float(self.task_transport_base_weight.item()), 1e-6)
         positive_slack = (task_weights - base_weight).clamp_min(0.0)
         mix = positive_slack / (positive_slack + base_weight)
@@ -728,7 +1134,10 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         dtype = usage.dtype
         work_dtype = torch.float64
         anchors = torch.stack(
-            [self._prototype_anchor(index).detach().to(device=device, dtype=work_dtype) for index in range(num_prototypes)],
+            [
+                self._prototype_anchor(index).detach().to(device=device, dtype=work_dtype)
+                for index in range(num_prototypes)
+            ],
             dim=0,
         )
         similarity = torch.matmul(anchors, anchors.transpose(0, 1)).clamp(-1.0, 1.0)
@@ -786,7 +1195,9 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
 
     @torch.no_grad()
     def _apply_birkhoff_lifecycle_transport(self) -> Dict[str, float]:
-        base_strength = float(min(max(self.continual_config.prototype_birkhoff_transport_strength, 0.0), 1.0))
+        base_strength = float(
+            min(max(self.continual_config.prototype_birkhoff_transport_strength, 0.0), 1.0)
+        )
         num_prototypes = self.continual_config.num_prototypes
         if base_strength <= 0.0 or num_prototypes <= 1:
             return self._birkhoff_lifecycle_stats(base_strength=base_strength)
@@ -799,18 +1210,26 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         transition = self._birkhoff_lifecycle_transition(usage, capacity)
         transport = transition.transpose(0, 1)
         identity = torch.eye(num_prototypes, device=transition.device, dtype=transition.dtype)
-        offdiag_mass = float(((transition * (1.0 - identity)).sum() / max(1, num_prototypes)).item())
+        offdiag_mass = float(
+            ((transition * (1.0 - identity)).sum() / max(1, num_prototypes)).item()
+        )
         row_error = float((transition.sum(dim=-1) - 1.0).abs().max().item())
         col_error = float((transition.sum(dim=0) - 1.0).abs().max().item())
 
-        def transported_vector_with_strength(vector: torch.Tensor, candidate_strength: float) -> torch.Tensor:
-            return (1.0 - candidate_strength) * vector + candidate_strength * torch.matmul(transport, vector)
+        def transported_vector_with_strength(
+            vector: torch.Tensor, candidate_strength: float
+        ) -> torch.Tensor:
+            return (1.0 - candidate_strength) * vector + candidate_strength * torch.matmul(
+                transport, vector
+            )
 
         def projected_gap(candidate_strength: float) -> float:
             if candidate_strength <= 0.0:
                 return pre_gap
             next_usage = transported_vector_with_strength(usage, candidate_strength).clamp_min(0.0)
-            next_capacity = transported_vector_with_strength(capacity, candidate_strength).clamp_min(0.0)
+            next_capacity = transported_vector_with_strength(
+                capacity, candidate_strength
+            ).clamp_min(0.0)
             return float((next_usage - next_capacity).abs().mean().item())
 
         effective_strength = base_strength
@@ -819,9 +1238,13 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             if gap_target > 0.0:
                 effective_strength *= min(1.0, pre_gap / max(gap_target, 1e-12))
 
-            max_applied_offdiag_mass = float(self.continual_config.prototype_birkhoff_max_applied_offdiag_mass)
+            max_applied_offdiag_mass = float(
+                self.continual_config.prototype_birkhoff_max_applied_offdiag_mass
+            )
             if max_applied_offdiag_mass > 0.0 and offdiag_mass > 0.0:
-                effective_strength = min(effective_strength, max_applied_offdiag_mass / offdiag_mass)
+                effective_strength = min(
+                    effective_strength, max_applied_offdiag_mass / offdiag_mass
+                )
 
             gap_tolerance = max(float(self.continual_config.prototype_birkhoff_gap_tolerance), 0.0)
             post_gap = projected_gap(effective_strength)
@@ -831,7 +1254,9 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
                 effective_strength *= 0.5
                 post_gap = projected_gap(effective_strength)
 
-            if effective_strength < max(float(self.continual_config.prototype_birkhoff_min_effective_strength), 0.0):
+            if effective_strength < max(
+                float(self.continual_config.prototype_birkhoff_min_effective_strength), 0.0
+            ):
                 effective_strength = 0.0
                 post_gap = pre_gap
         else:
@@ -852,22 +1277,36 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             return transported_vector_with_strength(vector, effective_strength)
 
         def transported_matrix(matrix: torch.Tensor) -> torch.Tensor:
-            return (1.0 - effective_strength) * matrix + effective_strength * torch.matmul(transport, matrix)
+            return (1.0 - effective_strength) * matrix + effective_strength * torch.matmul(
+                transport, matrix
+            )
 
         embeddings = self.prototype_gate.prototype_embeddings.detach()
         mixed_embeddings = transported_matrix(embeddings)
         self.prototype_gate.prototype_embeddings.copy_(F.normalize(mixed_embeddings, dim=-1))
         self.prototype_head_memory.copy_(transported_matrix(self.prototype_head_memory))
         flat_patterns = self.prototype_pattern_memory.view(num_prototypes, -1)
-        self.prototype_pattern_memory.copy_(transported_matrix(flat_patterns).view_as(self.prototype_pattern_memory))
+        self.prototype_pattern_memory.copy_(
+            transported_matrix(flat_patterns).view_as(self.prototype_pattern_memory)
+        )
         mixed_latents = transported_matrix(self.prototype_latent_ema)
         latent_norms = mixed_latents.norm(dim=-1, keepdim=True)
-        self.prototype_latent_ema.copy_(torch.where(latent_norms > 1e-6, mixed_latents / latent_norms.clamp_min(1e-6), mixed_latents))
+        self.prototype_latent_ema.copy_(
+            torch.where(
+                latent_norms > 1e-6, mixed_latents / latent_norms.clamp_min(1e-6), mixed_latents
+            )
+        )
         self.prototype_usage_ema.copy_(transported_vector(self.prototype_usage_ema).clamp_min(0.0))
-        self.prototype_capacity_ema.copy_(transported_vector(self.prototype_capacity_ema).clamp_min(0.0))
-        self.prototype_support_ema.copy_(transported_vector(self.prototype_support_ema).clamp(0.0, 1.0))
+        self.prototype_capacity_ema.copy_(
+            transported_vector(self.prototype_capacity_ema).clamp_min(0.0)
+        )
+        self.prototype_support_ema.copy_(
+            transported_vector(self.prototype_support_ema).clamp(0.0, 1.0)
+        )
         self.prototype_excess_ema.copy_(self.prototype_usage_ema - self.prototype_capacity_ema)
-        post_gap = float((self.prototype_usage_ema - self.prototype_capacity_ema).abs().mean().item())
+        post_gap = float(
+            (self.prototype_usage_ema - self.prototype_capacity_ema).abs().mean().item()
+        )
 
         return self._birkhoff_lifecycle_stats(
             base_strength=base_strength,
@@ -901,7 +1340,9 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         )
 
         normalized_prototypes = F.normalize(self.prototype_gate.prototype_embeddings, dim=-1)
-        prototype_similarity = torch.matmul(normalized_prototypes, normalized_prototypes.transpose(0, 1))
+        prototype_similarity = torch.matmul(
+            normalized_prototypes, normalized_prototypes.transpose(0, 1)
+        )
         off_diagonal = prototype_similarity - torch.eye(
             prototype_similarity.size(0),
             device=prototype_similarity.device,
@@ -921,9 +1362,7 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             dim=0,
         )
         transport_cost = 1.0 - torch.matmul(normalized_latents, anchor_bank.transpose(0, 1))
-        transport_loss_per_sample = (
-            prototype_weights * transport_cost.clamp_min(0.0)
-        ).sum(dim=-1)
+        transport_loss_per_sample = (prototype_weights * transport_cost.clamp_min(0.0)).sum(dim=-1)
         transport_loss = transport_loss_per_sample.mean()
 
         batch = prototype_weights.size(0)
@@ -935,20 +1374,23 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         seen_sum = seen_mask.sum()
         if seen_sum.item() > 0:
             normalized_seen_weights = prototype_weights * seen_mask.unsqueeze(0)
-            normalized_seen_weights = normalized_seen_weights / normalized_seen_weights.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+            normalized_seen_weights = normalized_seen_weights / normalized_seen_weights.sum(
+                dim=-1, keepdim=True
+            ).clamp_min(1e-6)
 
-            remembered_head = torch.einsum("bp,ph->bh", normalized_seen_weights, self.prototype_head_memory)
+            remembered_head = torch.einsum(
+                "bp,ph->bh", normalized_seen_weights, self.prototype_head_memory
+            )
             routing_stability_loss = torch.sum(
                 prototype_weights.clamp_min(1e-6)
-                * (
-                    prototype_weights.clamp_min(1e-6).log()
-                    - routing_prior.clamp_min(1e-6).log()
-                ),
+                * (prototype_weights.clamp_min(1e-6).log() - routing_prior.clamp_min(1e-6).log()),
                 dim=-1,
             ).mean()
             stability_loss = F.mse_loss(head_importance, remembered_head) + routing_stability_loss
 
-            base_masks = self._get_base_pattern_masks(seq_len, device).to(dtype=pattern_weights.dtype)
+            base_masks = self._get_base_pattern_masks(seq_len, device).to(
+                dtype=pattern_weights.dtype
+            )
             remembered_support = torch.einsum(
                 "bp,phm,mhij->bhij",
                 normalized_seen_weights,
@@ -1003,13 +1445,17 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         if prototype_capacity is None:
             prototype_capacity = torch.full_like(average_usage, 1.0 / average_usage.numel())
         else:
-            prototype_capacity = prototype_capacity.to(device=average_usage.device, dtype=average_usage.dtype)
+            prototype_capacity = prototype_capacity.to(
+                device=average_usage.device, dtype=average_usage.dtype
+            )
             prototype_capacity = prototype_capacity / prototype_capacity.sum().clamp_min(1e-6)
 
         if prototype_support is None:
             average_support = (prototype_weights > 0).to(dtype=average_usage.dtype).mean(dim=0)
         else:
-            average_support = prototype_support.to(device=average_usage.device, dtype=average_usage.dtype).mean(dim=0)
+            average_support = prototype_support.to(
+                device=average_usage.device, dtype=average_usage.dtype
+            ).mean(dim=0)
 
         excess = average_usage - prototype_capacity
         momentum = self.continual_config.prototype_usage_momentum
@@ -1023,12 +1469,18 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         self.prototype_excess_ema.add_(excess * (1.0 - momentum))
 
         if prototype_latents is not None:
-            prototype_latents = prototype_latents.to(device=prototype_weights.device, dtype=prototype_weights.dtype)
+            prototype_latents = prototype_latents.to(
+                device=prototype_weights.device, dtype=prototype_weights.dtype
+            )
 
         if task_ids is not None:
-            task_ids = task_ids.to(device=prototype_weights.device).long().clamp(
-                min=0,
-                max=self.continual_config.num_tasks - 1,
+            task_ids = (
+                task_ids.to(device=prototype_weights.device)
+                .long()
+                .clamp(
+                    min=0,
+                    max=self.continual_config.num_tasks - 1,
+                )
             )
             task_momentum = self.continual_config.prototype_usage_momentum
             for task_id in task_ids.unique(sorted=True).tolist():
@@ -1062,12 +1514,16 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
                 self.prototype_head_memory[prototype_id].add_(
                     prototype_head * (1.0 - self.continual_config.memory_momentum)
                 )
-                self.prototype_pattern_memory[prototype_id].mul_(self.continual_config.memory_momentum)
+                self.prototype_pattern_memory[prototype_id].mul_(
+                    self.continual_config.memory_momentum
+                )
                 self.prototype_pattern_memory[prototype_id].add_(
                     prototype_pattern * (1.0 - self.continual_config.memory_momentum)
                 )
                 if prototype_latent is not None:
-                    self.prototype_latent_ema[prototype_id].mul_(self.continual_config.memory_momentum)
+                    self.prototype_latent_ema[prototype_id].mul_(
+                        self.continual_config.memory_momentum
+                    )
                     self.prototype_latent_ema[prototype_id].add_(
                         prototype_latent * (1.0 - self.continual_config.memory_momentum)
                     )
@@ -1086,18 +1542,26 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         noise_scale: Optional[float] = None,
     ) -> Dict[str, float]:
         reset_threshold = (
-            self.continual_config.prototype_reset_threshold if reset_threshold is None else reset_threshold
+            self.continual_config.prototype_reset_threshold
+            if reset_threshold is None
+            else reset_threshold
         )
         split_threshold = (
-            self.continual_config.prototype_split_threshold if split_threshold is None else split_threshold
+            self.continual_config.prototype_split_threshold
+            if split_threshold is None
+            else split_threshold
         )
-        noise_scale = self.continual_config.prototype_noise_scale if noise_scale is None else noise_scale
+        noise_scale = (
+            self.continual_config.prototype_noise_scale if noise_scale is None else noise_scale
+        )
 
         usage = self.prototype_usage_ema.clone()
         capacity = self.prototype_capacity_ema.clone()
         support = self.prototype_support_ema.clone()
         excess = self.prototype_excess_ema.clone()
-        relocation_strength = min(max(self.continual_config.prototype_relocation_strength, 0.0), 1.0)
+        relocation_strength = min(
+            max(self.continual_config.prototype_relocation_strength, 0.0), 1.0
+        )
         merge_threshold = min(max(self.continual_config.prototype_merge_threshold, -1.0), 1.0)
         merge_usage_threshold = max(0.0, self.continual_config.prototype_merge_usage_threshold)
         if capacity.sum().item() <= 0:
@@ -1108,20 +1572,30 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         gap = (usage - capacity).abs()
         deficit_barycenter = self._transport_barycenter(deficit.clamp_min(0.0))
 
-        split_candidates = torch.nonzero(
-            (excess > split_threshold) | ((usage > split_threshold) & (support > reset_threshold)),
-            as_tuple=False,
-        ).squeeze(-1).tolist()
+        split_candidates = (
+            torch.nonzero(
+                (excess > split_threshold)
+                | ((usage > split_threshold) & (support > reset_threshold)),
+                as_tuple=False,
+            )
+            .squeeze(-1)
+            .tolist()
+        )
         split_candidates = sorted(
             split_candidates,
             key=lambda idx: (float(excess[idx]), float(usage[idx])),
             reverse=True,
         )
 
-        target_candidates = torch.nonzero(
-            (deficit > reset_threshold) | ((usage < reset_threshold) & (support < split_threshold)),
-            as_tuple=False,
-        ).squeeze(-1).tolist()
+        target_candidates = (
+            torch.nonzero(
+                (deficit > reset_threshold)
+                | ((usage < reset_threshold) & (support < split_threshold)),
+                as_tuple=False,
+            )
+            .squeeze(-1)
+            .tolist()
+        )
         target_candidates = sorted(
             target_candidates,
             key=lambda idx: (float(deficit[idx]), float(-usage[idx])),
@@ -1149,7 +1623,9 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             source_anchor = self._prototype_anchor(source_index)
             if deficit_barycenter is None:
                 deficit_barycenter = source_anchor
-            transfer_share = deficit[target_index] / (deficit[target_index] + excess[source_index].clamp_min(1e-6))
+            transfer_share = deficit[target_index] / (
+                deficit[target_index] + excess[source_index].clamp_min(1e-6)
+            )
             transfer_share = transfer_share.clamp(0.25, 0.75)
             transport_anchor = self._normalize_prototype_vector(
                 (1.0 - transfer_share) * source_anchor + transfer_share * deficit_barycenter,
@@ -1168,10 +1644,14 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             noise = torch.randn_like(source_embedding) * noise_scale
             self.prototype_gate.prototype_embeddings[source_index].copy_(source_relocated)
             self.prototype_gate.prototype_embeddings[target_index].copy_(
-                self._normalize_prototype_vector(target_relocated + noise, fallback=transport_anchor)
+                self._normalize_prototype_vector(
+                    target_relocated + noise, fallback=transport_anchor
+                )
             )
             self.prototype_head_memory[target_index].copy_(self.prototype_head_memory[source_index])
-            self.prototype_pattern_memory[target_index].copy_(self.prototype_pattern_memory[source_index])
+            self.prototype_pattern_memory[target_index].copy_(
+                self.prototype_pattern_memory[source_index]
+            )
             self.prototype_memory_seen[target_index] = self.prototype_memory_seen[source_index]
             self.prototype_latent_ema[target_index].copy_(transport_anchor)
             self.prototype_latent_ema[source_index].copy_(source_anchor)
@@ -1182,7 +1662,9 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
 
             self.prototype_usage_ema[source_index].copy_(source_usage * (1.0 - transfer_share))
             self.prototype_usage_ema[target_index].copy_(source_usage * transfer_share)
-            self.prototype_capacity_ema[source_index].copy_(source_capacity * (1.0 - transfer_share))
+            self.prototype_capacity_ema[source_index].copy_(
+                source_capacity * (1.0 - transfer_share)
+            )
             self.prototype_capacity_ema[target_index].copy_(source_capacity * transfer_share)
             self.prototype_support_ema[source_index].copy_(source_support * (1.0 - transfer_share))
             self.prototype_support_ema[target_index].copy_(source_support * transfer_share)
@@ -1207,10 +1689,15 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
         gap = excess.abs()
         deficit_barycenter = self._transport_barycenter(deficit.clamp_min(0.0))
 
-        seen_indices = torch.nonzero(self.prototype_memory_seen, as_tuple=False).squeeze(-1).tolist()
+        seen_indices = (
+            torch.nonzero(self.prototype_memory_seen, as_tuple=False).squeeze(-1).tolist()
+        )
         if len(seen_indices) >= 2:
             anchors = torch.stack(
-                [self._prototype_anchor(index) for index in range(self.continual_config.num_prototypes)],
+                [
+                    self._prototype_anchor(index)
+                    for index in range(self.continual_config.num_prototypes)
+                ],
                 dim=0,
             )
             similarity = torch.matmul(anchors, anchors.transpose(0, 1))
@@ -1244,13 +1731,15 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
                 merge_weight = float((usage[merge_index] + capacity[merge_index]).item())
                 total_weight = max(1e-6, keep_weight + merge_weight)
                 merged_anchor = self._normalize_prototype_vector(
-                    (keep_weight / total_weight) * keep_anchor + (merge_weight / total_weight) * merge_anchor,
+                    (keep_weight / total_weight) * keep_anchor
+                    + (merge_weight / total_weight) * merge_anchor,
                     fallback=keep_anchor,
                 )
                 current_keep = self.prototype_gate.prototype_embeddings[keep_index]
                 self.prototype_gate.prototype_embeddings[keep_index].copy_(
                     self._normalize_prototype_vector(
-                        (1.0 - relocation_strength) * current_keep + relocation_strength * merged_anchor,
+                        (1.0 - relocation_strength) * current_keep
+                        + relocation_strength * merged_anchor,
                         fallback=merged_anchor,
                     )
                 )
@@ -1273,8 +1762,13 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
                 )
                 self.prototype_latent_ema[keep_index].copy_(merged_anchor)
 
-                merged_usage = (self.prototype_usage_ema[keep_index] + self.prototype_usage_ema[merge_index]).clamp_max(1.0)
-                merged_capacity = (self.prototype_capacity_ema[keep_index] + self.prototype_capacity_ema[merge_index]).clamp_max(1.0)
+                merged_usage = (
+                    self.prototype_usage_ema[keep_index] + self.prototype_usage_ema[merge_index]
+                ).clamp_max(1.0)
+                merged_capacity = (
+                    self.prototype_capacity_ema[keep_index]
+                    + self.prototype_capacity_ema[merge_index]
+                ).clamp_max(1.0)
                 merged_support = 1.0 - (
                     (1.0 - self.prototype_support_ema[keep_index].clamp(0.0, 1.0))
                     * (1.0 - self.prototype_support_ema[merge_index].clamp(0.0, 1.0))
@@ -1392,38 +1886,28 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
 
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = map(
-            lambda tensor: tensor.reshape(batch, seq_len, self.num_heads, self.dim_head).transpose(1, 2),
+            lambda tensor: tensor.reshape(batch, seq_len, self.num_heads, self.dim_head).transpose(
+                1, 2
+            ),
             qkv,
         )
         q = q * self.scale
 
         normalized_mask = None
         if mask is not None:
-            normalized_mask = self._normalize_attention_mask(mask, batch, self.num_heads, seq_len)
+            normalized_mask = normalize_attention_mask(mask, batch, self.num_heads, seq_len)
 
-        outputs = []
-        prototype_pattern_masks = []
-        for batch_index in range(batch):
-            prototype_pattern_mask = self._build_task_pattern_mask(
-                gate_info["pattern_logits"][batch_index],
-                seq_len,
-                x.device,
-            )
-            prototype_pattern_masks.append(prototype_pattern_mask)
-
-            positions, valid_mask = pattern_mask_to_indices(prototype_pattern_mask)
-            sample_mask = None if normalized_mask is None else normalized_mask[batch_index : batch_index + 1]
-            sample_out = self._compute_sparse_attention_from_indices(
-                q[batch_index : batch_index + 1],
-                k[batch_index : batch_index + 1],
-                v[batch_index : batch_index + 1],
-                positions,
-                valid_mask,
-                mask=sample_mask,
-            )
-            outputs.append(sample_out)
-
-        attn_out = torch.cat(outputs, dim=0)
+        attn_out, prototype_pattern_masks = self._compute_grouped_pattern_attention(
+            q,
+            k,
+            v,
+            gate_info["pattern_logits"],
+            seq_len,
+            x.device,
+            normalized_mask=normalized_mask,
+            return_pattern_masks=return_info,
+            group_hint_ids=task_ids,
+        )
         attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, dim)
         attn_out = self.to_out(attn_out)
 
@@ -1447,16 +1931,21 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             seq_len=seq_len,
             device=x.device,
         )
-        selected_patterns = gate_info["pattern_logits"].topk(
-            k=min(self.continual_config.top_k_patterns, len(self.pattern_bank)),
-            dim=-1,
-        ).indices
+        selected_patterns = (
+            gate_info["pattern_logits"]
+            .topk(
+                k=min(self.continual_config.top_k_patterns, len(self.pattern_bank)),
+                dim=-1,
+            )
+            .indices
+        )
 
         info = {
             "prototype_logits": gate_info["prototype_logits"],
             "proximal_logits": gate_info["proximal_logits"],
             "prototype_prior": gate_info["prototype_prior"],
             "prototype_capacity": gate_info["prototype_capacity"],
+            "prototype_target_capacity": gate_info["prototype_target_capacity"],
             "prototype_support": gate_info["prototype_support"],
             "prototype_weights": gate_info["prototype_weights"],
             "prototype_usage": self.prototype_usage_ema.detach().clone(),
@@ -1468,7 +1957,20 @@ class PrototypeContinualASAMLayer(ContinualASAMLayer):
             "pattern_weights": gate_info["pattern_weights"],
             "head_importance": gate_info["head_importance"],
             "selected_patterns": selected_patterns,
-            "prototype_pattern_masks": torch.stack(prototype_pattern_masks, dim=0),
+            "prototype_pattern_masks": prototype_pattern_masks,
             **regularization,
         }
+        for key in [
+            "candidate_support_residual",
+            "support_projection_residual",
+            "support_residual_delta",
+            "target_capacity_residual",
+            "effective_capacity_residual",
+            "support_density",
+            "support_size",
+            "support_active_prototypes",
+            "support_weight_leakage",
+            "capacity_bias_selection_rate",
+        ]:
+            info[key] = gate_info[key]
         return x, info

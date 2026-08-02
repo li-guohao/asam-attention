@@ -7,6 +7,7 @@ import math
 import torch
 
 from asam.asam_layer_optimized import OptimizedASAMLayer
+from asam._common import gather_values_by_positions
 from asam.efficient_attention import EfficientASAMLayer
 from asam.sparse_patterns import StridedSparsePattern
 
@@ -17,6 +18,34 @@ def _dense_reference_attention(q, k, v, mask):
     attn = torch.softmax(scores, dim=-1)
     attn = torch.nan_to_num(attn, nan=0.0)
     return torch.matmul(attn, v)
+
+
+def test_position_gather_preserves_independent_heads():
+    tensor = torch.arange(1 * 2 * 5 * 3).reshape(1, 2, 5, 3)
+    positions = torch.tensor([[0, 1], [1, 2], [2, 3], [3, 4], [4, 4]])
+
+    gathered = gather_values_by_positions(tensor, positions)
+
+    assert gathered.shape == (1, 2, 5, 2, 3)
+    assert torch.equal(gathered[0, 0, 0], tensor[0, 0, positions[0]])
+    assert torch.equal(gathered[0, 1, 0], tensor[0, 1, positions[0]])
+    assert not torch.equal(gathered[0, 0], gathered[0, 1])
+
+
+def test_position_gather_supports_head_specific_positions():
+    tensor = torch.arange(1 * 2 * 5 * 3).reshape(1, 2, 5, 3)
+    positions = torch.tensor(
+        [
+            [[0, 1], [1, 2], [2, 3], [3, 4], [4, 4]],
+            [[4, 3], [3, 2], [2, 1], [1, 0], [0, 0]],
+        ]
+    )
+
+    gathered = gather_values_by_positions(tensor, positions)
+
+    assert gathered.shape == (1, 2, 5, 2, 3)
+    assert torch.equal(gathered[0, 0, 0], tensor[0, 0, positions[0, 0]])
+    assert torch.equal(gathered[0, 1, 0], tensor[0, 1, positions[1, 0]])
 
 
 def test_optimized_gate_shapes_follow_num_heads():

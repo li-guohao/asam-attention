@@ -7,8 +7,9 @@ eliminate code duplication.
 
 from __future__ import annotations
 
-import torch
 from typing import Optional, Tuple
+
+import torch
 
 
 def normalize_attention_mask(
@@ -69,16 +70,17 @@ def gather_values_by_positions(
     """Gather values from a tensor at specified positions along dim=2.
 
     Given a tensor of shape [batch, heads, seq_len, dim_head] and positions
-    of shape [seq_len, context_size], returns a tensor of shape
+    of shape [seq_len, context_size] or [heads, seq_len, context_size], returns a tensor of shape
     [batch, heads, seq_len, context_size, dim_head] where position (i, j)
-    selects tensor[:, :, positions[i, j], :].
+    selects tensor[:, :, positions[i, j], :] for broadcast positions, or
+    tensor[:, h, positions[h, i, j], :] for head-specific positions.
 
     Used in sparse attention to gather only the keys/values that are
     included in the sparse pattern, avoiding O(n^2) memory.
 
     Args:
         tensor: Source tensor [batch, heads, seq_len, dim_head].
-        positions: Index tensor [seq_len, context_size] with values in [0, seq_len).
+        positions: Index tensor with values in [0, seq_len).
 
     Returns:
         Gathered tensor [batch, heads, seq_len, context_size, dim_head].
@@ -86,9 +88,27 @@ def gather_values_by_positions(
     batch, heads, seq_len, dim_head = tensor.shape
     context_size = positions.size(-1)
 
+    if positions.dim() == 2:
+        if positions.size(0) != seq_len:
+            raise ValueError("broadcast positions must match sequence length")
+        head_positions = positions.view(1, seq_len, context_size).expand(heads, -1, -1)
+    elif positions.dim() == 3:
+        if positions.size(1) != seq_len:
+            raise ValueError("head-specific positions must match sequence length")
+        if positions.size(0) == 1 and heads != 1:
+            head_positions = positions.expand(heads, -1, -1)
+        elif positions.size(0) == heads:
+            head_positions = positions
+        else:
+            raise ValueError("head-specific positions must match attention head count")
+    else:
+        raise ValueError(
+            "positions must have shape [seq_len, context] or [heads, seq_len, context]"
+        )
+
     expanded_tensor = tensor.unsqueeze(3).expand(-1, -1, -1, context_size, -1)
-    gather_index = positions.unsqueeze(0).unsqueeze(-1).expand(
-        batch, -1, -1, -1, dim_head
+    gather_index = head_positions.view(1, heads, seq_len, context_size, 1).expand(
+        batch, heads, -1, -1, dim_head
     )
     return torch.gather(expanded_tensor, 2, gather_index)
 
@@ -139,13 +159,10 @@ def pattern_mask_to_indices(
     num_connections = pattern_mask.sum(dim=-1)
     max_connections = max(1, int(num_connections.max().item()))
 
-    sorted_indices = torch.argsort(
-        pattern_mask.to(torch.int64), dim=-1, descending=True
-    )
+    sorted_indices = torch.argsort(pattern_mask.to(torch.int64), dim=-1, descending=True)
     positions = sorted_indices[..., :max_connections]
-    valid_mask = (
-        torch.arange(max_connections, device=pattern_mask.device).view(1, 1, -1)
-        < num_connections.unsqueeze(-1)
-    )
+    valid_mask = torch.arange(max_connections, device=pattern_mask.device).view(
+        1, 1, -1
+    ) < num_connections.unsqueeze(-1)
 
     return positions, valid_mask

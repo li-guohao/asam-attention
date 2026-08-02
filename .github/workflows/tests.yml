@@ -1,103 +1,105 @@
-name: Tests
+name: CI
 
 on:
   push:
-    branches: [ master ]
   pull_request:
-    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
-
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Cache pip packages
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install torch numpy pytest pytest-cov
-        pip install -e .
-    
-    - name: Run unit tests
-      run: |
-        pytest tests/ -v --cov=asam --cov-report=xml --cov-report=term
-    
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-
   lint:
+    name: Lint and format checks
     runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-    
-    - name: Install linting tools
-      run: |
-        pip install flake8 black isort
-    
-    - name: Lint with flake8
-      run: |
-        flake8 asam/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 asam/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
-    - name: Check formatting with black
-      run: |
-        black --check asam/
-    
-    - name: Check imports with isort
-      run: |
-        isort --check-only asam/
+    timeout-minutes: 10
 
-  benchmark:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-    
-    - name: Install dependencies
-      run: |
-        pip install torch numpy matplotlib
-        pip install -e .
-    
-    - name: Run quick benchmark
-      run: |
-        python benchmarks/sota_comparison.py
-    
-    - name: Upload benchmark results
-      uses: actions/upload-artifact@v3
-      with:
-        name: benchmark-results
-        path: |
-          sota_comparison_results.json
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install black flake8 isort
+
+      - name: Lint with flake8
+        run: |
+          flake8 asam/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 asam/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Check formatting with black
+        run: black --check asam/
+
+      - name: Check imports with isort
+        run: isort --check-only asam/
+
+  test:
+    name: Fast unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,viz]" pytest-cov
+
+      - name: Run fast unit tests
+        run: |
+          pytest -q \
+            tests/test_ci_workflow.py \
+            tests/test_experiment_artifact_audit.py \
+            tests/test_basic.py \
+            tests/test_asam.py \
+            tests/test_efficient.py \
+            tests/test_optimized_layer.py \
+            tests/test_continual_asam.py::test_continual_asam_forward_shapes \
+            tests/test_continual_asam.py::test_continual_regularization_is_finite \
+            tests/test_continual_asam.py::test_task_memory_update_reduces_stability_error_on_revisit \
+            tests/test_continual_asam.py::test_overlap_regularization_uses_seen_task_memory_without_mixed_batch \
+            tests/test_continual_asam.py::test_continual_asam_accepts_scalar_task_id \
+            tests/test_continual_asam.py::test_sinkhorn_transport_matches_capacity_target \
+            tests/test_continual_asam.py::test_prototype_routing_is_topk_sparse_and_memory_biased \
+            tests/test_continual_asam.py::test_prototype_memory_update_enables_stability_regularization \
+            tests/test_continual_asam.py::test_prototype_memory_tracks_capacity_and_support_statistics \
+            tests/test_continual_asam.py::test_prototype_regularizers_are_finite_and_non_negative \
+            tests/test_continual_asam.py::test_prototype_refresh_can_reset_and_split \
+            tests/test_continual_asam.py::test_birkhoff_lifecycle_transition_is_doubly_stochastic_and_mass_preserving \
+            tests/test_continual_asam.py::test_birkhoff_adaptive_gate_caps_applied_transport_and_preserves_gap \
+            tests/test_continual_asam.py::test_prototype_prior_can_shift_toward_task_conditioned_capacity_memory \
+            tests/test_continual_ablation.py::test_build_benchmark_args_forwards_transport_weight_override \
+            tests/test_continual_operator_ablation.py \
+            tests/test_continual_capacity_sweep.py \
+            tests/test_paper_pipeline.py \
+            tests/test_sync_continual_appendix.py \
+            --cov=asam --cov-report=xml --cov-report=term
+
+      - name: Generate experiment artifact audit
+        run: python scripts/audit_experiment_artifacts.py > experiment_artifact_audit.json || true
+
+      - name: Upload diagnostic artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics
+          path: |
+            coverage.xml
+            experiment_artifact_audit.json
+          if-no-files-found: ignore

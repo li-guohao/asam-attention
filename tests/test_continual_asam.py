@@ -2,10 +2,22 @@
 Tests for continual-learning ASAM extensions.
 """
 
+from dataclasses import replace
+
 import torch
 
 from asam import ContinualASAMConfig, ContinualASAMLayer, PrototypeContinualASAMLayer
+import asam.continual_asam as continual_asam_module
 from asam.continual_asam import PrototypeSparseGate
+
+
+def _paired_layers(layer_cls, config):
+    legacy = layer_cls(replace(config, grouped_indexed_attention=False))
+    grouped = layer_cls(replace(config, grouped_indexed_attention=True))
+    grouped.load_state_dict(legacy.state_dict())
+    legacy.eval()
+    grouped.eval()
+    return legacy, grouped
 
 
 def test_continual_asam_forward_shapes():
@@ -84,6 +96,76 @@ def test_continual_asam_accepts_scalar_task_id():
     assert output.shape == x.shape
 
 
+def test_grouped_task_attention_matches_legacy_forward_and_backward():
+    torch.manual_seed(123)
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_tasks=4,
+        top_k_patterns=2,
+        dropout=0.0,
+    )
+    legacy, grouped = _paired_layers(ContinualASAMLayer, config)
+    task_ids = torch.tensor([0, 1, 0, 2])
+    mask = torch.ones(4, 1, 12, 12, dtype=torch.bool)
+    mask[:, :, 3, :] = False
+    x = torch.randn(4, 12, 32)
+    legacy_x = x.clone().requires_grad_(True)
+    grouped_x = x.clone().requires_grad_(True)
+
+    legacy_out, legacy_info = legacy(legacy_x, task_ids=task_ids, mask=mask, return_info=True)
+    grouped_out, grouped_info = grouped(grouped_x, task_ids=task_ids, mask=mask, return_info=True)
+
+    assert torch.allclose(grouped_out, legacy_out, atol=1e-6, rtol=1e-5)
+    assert torch.equal(grouped_info["task_pattern_masks"], legacy_info["task_pattern_masks"])
+    assert torch.allclose(grouped_info["pattern_logits"], legacy_info["pattern_logits"], atol=1e-6)
+    assert torch.allclose(grouped_info["pattern_weights"], legacy_info["pattern_weights"], atol=1e-6)
+    assert torch.allclose(grouped_info["head_importance"], legacy_info["head_importance"], atol=1e-6)
+
+    legacy_out.square().mean().backward()
+    grouped_out.square().mean().backward()
+
+    assert torch.allclose(grouped_x.grad, legacy_x.grad, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(grouped.to_qkv.weight.grad, legacy.to_qkv.weight.grad, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(grouped.to_out[0].weight.grad, legacy.to_out[0].weight.grad, atol=1e-6, rtol=1e-5)
+
+
+def test_grouped_task_attention_reuses_indices_for_repeated_signatures(monkeypatch):
+    torch.manual_seed(321)
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_tasks=4,
+        top_k_patterns=2,
+        dropout=0.0,
+        grouped_indexed_attention=True,
+    )
+    layer = ContinualASAMLayer(config)
+    layer.eval()
+    for parameter in layer.task_gate.parameters():
+        parameter.data.zero_()
+
+    calls = 0
+    original = continual_asam_module.pattern_mask_to_indices
+
+    def counted_pattern_mask_to_indices(pattern_mask):
+        nonlocal calls
+        calls += 1
+        return original(pattern_mask)
+
+    monkeypatch.setattr(continual_asam_module, "pattern_mask_to_indices", counted_pattern_mask_to_indices)
+
+    x = torch.randn(6, 10, 32)
+    task_ids = torch.tensor([0, 1, 2, 3, 0, 1])
+    output, info = layer(x, task_ids=task_ids, return_info=True)
+
+    assert output.shape == x.shape
+    assert info["task_pattern_masks"].shape == (6, 2, 10, 10)
+    assert calls == 1
+
+
 def test_prototype_continual_asam_forward_shapes():
     config = ContinualASAMConfig(
         dim=64,
@@ -105,13 +187,61 @@ def test_prototype_continual_asam_forward_shapes():
     assert info["prototype_support"].shape == (3, 5)
     assert info["prototype_prior"].shape == (3, 5)
     assert info["prototype_capacity"].shape == (5,)
+    assert info["prototype_target_capacity"].shape == (5,)
     assert info["pattern_weights"].shape == (3, 4, 4)
     assert info["prototype_pattern_masks"].shape[:3] == (3, 4, 18)
     assert info["transport_loss_per_sample"].shape == (3,)
+    for key in [
+        "candidate_support_residual",
+        "support_projection_residual",
+        "support_residual_delta",
+        "target_capacity_residual",
+        "effective_capacity_residual",
+        "support_density",
+        "support_size",
+        "support_active_prototypes",
+        "support_weight_leakage",
+        "capacity_bias_selection_rate",
+    ]:
+        assert key in info
+        assert info[key].shape == ()
+        assert torch.isfinite(info[key])
     assert torch.all(info["prototype_support"].sum(dim=-1) <= config.prototype_top_k)
     assert torch.allclose(
         info["transport_loss_per_sample"].mean(),
         info["transport_loss"],
+        atol=1e-6,
+    )
+
+
+def test_grouped_prototype_attention_matches_legacy_forward_with_head_mask():
+    torch.manual_seed(456)
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_prototypes=5,
+        prototype_embed_dim=16,
+        top_k_patterns=2,
+        prototype_top_k=2,
+        dropout=0.0,
+    )
+    legacy, grouped = _paired_layers(PrototypeContinualASAMLayer, config)
+    mask = torch.ones(3, 2, 14, 14, dtype=torch.bool)
+    mask[0, 0, :, 7:] = False
+    mask[1, 1, 2, :] = False
+    x = torch.randn(3, 14, 32)
+
+    legacy_out, legacy_info = legacy(x, mask=mask, return_info=True)
+    grouped_out, grouped_info = grouped(x, mask=mask, return_info=True)
+
+    assert torch.allclose(grouped_out, legacy_out, atol=1e-6, rtol=1e-5)
+    assert torch.equal(grouped_info["prototype_pattern_masks"], legacy_info["prototype_pattern_masks"])
+    assert torch.allclose(grouped_info["prototype_weights"], legacy_info["prototype_weights"], atol=1e-6)
+    assert torch.equal(grouped_info["prototype_support"], legacy_info["prototype_support"])
+    assert torch.allclose(
+        grouped_info["transport_loss_per_sample"],
+        legacy_info["transport_loss_per_sample"],
         atol=1e-6,
     )
 
@@ -143,6 +273,376 @@ def test_sinkhorn_transport_matches_capacity_target():
     assert weights.shape == logits.shape
     assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
     assert torch.allclose(weights.mean(dim=0), target_capacity, atol=5e-2)
+
+
+def test_masked_sinkhorn_routes_only_inside_support_and_tracks_effective_capacity():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [4.0, 3.0, -2.0, -3.0],
+            [3.5, 2.5, -2.0, -3.0],
+            [-2.0, -3.0, 4.0, 3.0],
+            [-2.0, -3.0, 3.5, 2.5],
+        ]
+    )
+    routing_prior = torch.full_like(logits, 0.25)
+
+    weights, support, effective_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+
+    assert weights.shape == logits.shape
+    assert support.shape == logits.shape
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+    assert torch.allclose(weights.mean(dim=0), effective_capacity, atol=5e-2)
+    assert torch.allclose(effective_capacity.sum(), torch.tensor(1.0), atol=1e-6)
+
+
+def test_masked_sinkhorn_capacity_bias_selects_lower_residual_support():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+        masked_sinkhorn_candidate_k=2,
+        masked_sinkhorn_capacity_bias=1.0,
+    )
+    logits = torch.tensor([[0.0, 0.35, 0.25, -1.0]] * 4)
+    routing_prior = torch.tensor([[0.55, 0.15, 0.15, 0.15]] * 4)
+    target_capacity = gate._build_capacity_target(routing_prior)
+
+    baseline_support = gate._build_masked_sinkhorn_support(logits)
+    baseline_capacity = gate._project_capacity_to_support(target_capacity, baseline_support)
+    weights, support, selected_capacity, diagnostics = gate._route_with_masked_sinkhorn(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
+
+    baseline_residual = (baseline_capacity - target_capacity).abs().sum()
+    selected_residual = (selected_capacity - target_capacity).abs().sum()
+
+    assert selected_residual < baseline_residual
+    assert diagnostics["support_residual_delta"] > 0
+    assert torch.isclose(diagnostics["capacity_bias_selection_rate"], torch.tensor(1.0))
+    assert diagnostics["effective_capacity_residual"] < 1e-3
+    assert diagnostics["support_weight_leakage"] > 0.0
+    assert not diagnostics["support_weight_leakage"].requires_grad
+    assert not torch.equal(support, baseline_support)
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+
+
+def test_masked_sinkhorn_capacity_bias_guard_keeps_baseline_when_biased_is_worse():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+        masked_sinkhorn_candidate_k=2,
+        masked_sinkhorn_capacity_bias=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [-0.5887, -0.8864, 3.0269, 2.8514],
+            [0.8097, -0.0437, -0.5222, -1.4857],
+            [0.1288, -2.5594, -1.6104, -2.5044],
+            [-2.4383, -0.7262, 1.0075, -1.1631],
+            [1.6340, -0.9426, 0.5532, -3.9280],
+        ]
+    )
+    routing_prior = torch.tensor([[0.3064, 0.1764, 0.2977, 0.2196]] * logits.size(0))
+    baseline_support = gate._build_masked_sinkhorn_support(logits)
+
+    _, support, selected_capacity, diagnostics = gate._route_with_masked_sinkhorn(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
+    target_capacity = gate._build_capacity_target(routing_prior)
+    baseline_capacity = gate._project_capacity_to_support(target_capacity, baseline_support)
+
+    assert torch.equal(support, baseline_support)
+    assert torch.allclose(selected_capacity, baseline_capacity, atol=1e-6)
+    assert torch.isclose(diagnostics["capacity_bias_selection_rate"], torch.tensor(0.0))
+    assert diagnostics["support_residual_delta"] >= -1e-6
+
+
+def test_masked_sinkhorn_zero_capacity_bias_keeps_logits_topk_support():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=100,
+        capacity_blend=1.0,
+        masked_sinkhorn_candidate_k=2,
+        masked_sinkhorn_capacity_bias=0.0,
+    )
+    logits = torch.tensor([[0.0, 0.35, 0.25, -1.0]] * 4)
+    routing_prior = torch.tensor([[0.55, 0.15, 0.15, 0.15]] * 4)
+
+    _, support, _, diagnostics = gate._route_with_masked_sinkhorn(
+        logits,
+        routing_prior,
+        return_diagnostics=True,
+    )
+
+    assert torch.equal(support, gate._build_masked_sinkhorn_support(logits))
+    assert torch.isclose(diagnostics["capacity_bias_selection_rate"], torch.tensor(0.0))
+    assert abs(float(diagnostics["support_residual_delta"])) < 1e-6
+
+
+def test_masked_sinkhorn_reduces_capacity_violation_vs_dense_then_projected_topk():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.6,
+        sinkhorn_iters=120,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [3.2677, 3.8614, 2.3063, -1.2405],
+            [4.0473, 2.8137, 0.5810, -0.8240],
+            [1.0048, 2.7836, 3.9056, -1.1163],
+            [1.0687, 2.8433, 3.8704, -1.3008],
+            [1.4607, -0.8482, 3.7879, 2.5868],
+            [0.6765, -2.2819, 3.0467, 5.2454],
+        ]
+    )
+    routing_prior = torch.tensor(
+        [
+            [0.4, 0.3, 0.2, 0.1],
+            [0.4, 0.3, 0.2, 0.1],
+            [0.4, 0.3, 0.2, 0.1],
+            [0.4, 0.3, 0.2, 0.1],
+            [0.4, 0.3, 0.2, 0.1],
+            [0.4, 0.3, 0.2, 0.1],
+        ]
+    )
+    target_capacity = gate._build_capacity_target(routing_prior)
+
+    dense_weights = gate._sinkhorn_transport_weights(logits, target_capacity)
+    projected_weights, projected_support = gate._topk_project_probabilities(dense_weights)
+    active_columns = projected_support.any(dim=0)
+    effective_capacity = target_capacity * active_columns.to(dtype=target_capacity.dtype)
+    effective_capacity = effective_capacity / effective_capacity.sum().clamp_min(1e-6)
+    masked_weights = gate._masked_sinkhorn_transport_weights(
+        logits,
+        effective_capacity,
+        projected_support,
+    )
+
+    projected_violation = (projected_weights.mean(dim=0) - target_capacity).abs().mean()
+    masked_violation = (masked_weights.mean(dim=0) - effective_capacity).abs().mean()
+
+    assert projected_violation > 0.03
+    assert masked_violation < 1e-3
+    assert masked_violation < projected_violation * 0.1
+    assert torch.all(masked_weights.masked_select(~projected_support) == 0.0)
+
+
+def test_masked_sinkhorn_infeasible_support_is_finite_and_row_normalized():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=1,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=80,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [4.0, 1.0, 0.0, -1.0],
+            [4.0, 0.5, 0.0, -1.0],
+            [4.0, 0.0, 0.0, -1.0],
+        ]
+    )
+    routing_prior = torch.full_like(logits, 0.25)
+
+    weights, support, effective_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+
+    assert torch.isfinite(weights).all()
+    assert torch.isfinite(effective_capacity).all()
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(logits.size(0)), atol=1e-5)
+    assert torch.all(weights[:, 1:] == 0.0)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+    assert torch.allclose(effective_capacity, torch.tensor([1.0, 0.0, 0.0, 0.0]))
+
+
+def test_masked_sinkhorn_capacity_projection_respects_support_upper_bounds():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=1,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=80,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [5.0, 0.0, 1.0, 0.0],
+            [5.0, 0.0, 1.0, 0.0],
+            [5.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 5.0, 0.0],
+        ]
+    )
+    routing_prior = torch.tensor(
+        [
+            [0.1, 0.1, 0.7, 0.1],
+            [0.1, 0.1, 0.7, 0.1],
+            [0.1, 0.1, 0.7, 0.1],
+            [0.1, 0.1, 0.7, 0.1],
+        ]
+    )
+
+    weights, support, effective_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+
+    expected_capacity = torch.tensor([0.75, 0.0, 0.25, 0.0])
+    assert torch.allclose(effective_capacity, expected_capacity, atol=1e-6)
+    assert torch.allclose(weights.mean(dim=0), expected_capacity, atol=1e-6)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+
+
+def test_masked_sinkhorn_capacity_projection_handles_hall_subset_constraints():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=4,
+        top_k=2,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=120,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [5.0, 4.0, 0.0, 0.0],
+            [5.0, 4.0, 0.0, 0.0],
+            [0.0, 0.0, 5.0, 4.0],
+            [0.0, 0.0, 5.0, 4.0],
+        ]
+    )
+    routing_prior = torch.tensor(
+        [
+            [0.45, 0.45, 0.05, 0.05],
+            [0.45, 0.45, 0.05, 0.05],
+            [0.45, 0.45, 0.05, 0.05],
+            [0.45, 0.45, 0.05, 0.05],
+        ]
+    )
+
+    weights, support, effective_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+
+    expected_capacity = torch.full((4,), 0.25)
+    assert torch.allclose(effective_capacity, expected_capacity, atol=1e-6)
+    assert torch.allclose(weights.mean(dim=0), expected_capacity, atol=1e-3)
+    assert torch.all(weights.masked_select(~support) == 0.0)
+
+
+def test_masked_sinkhorn_degenerates_to_sinkhorn_when_support_is_dense():
+    gate = PrototypeSparseGate(
+        dim=16,
+        num_heads=2,
+        num_patterns=4,
+        num_prototypes=3,
+        top_k=3,
+        routing_strategy="masked_sinkhorn_topk",
+        sinkhorn_epsilon=0.2,
+        sinkhorn_iters=80,
+        capacity_blend=1.0,
+    )
+    logits = torch.tensor(
+        [
+            [3.0, 1.0, 0.5],
+            [2.5, 1.5, 0.2],
+            [0.3, 2.5, 3.0],
+            [0.4, 2.2, 2.8],
+        ]
+    )
+    routing_prior = torch.full_like(logits, 1.0 / logits.size(-1))
+
+    masked_weights, masked_support, masked_capacity = gate._route_with_masked_sinkhorn(logits, routing_prior)
+    dense_weights, dense_support, dense_capacity = gate._route_with_sinkhorn(logits, routing_prior)
+
+    assert torch.allclose(masked_weights, dense_weights, atol=1e-6)
+    assert torch.equal(masked_support, dense_support)
+    assert torch.allclose(masked_capacity, dense_capacity, atol=1e-6)
+
+
+def test_prototype_layer_accepts_masked_sinkhorn_strategy():
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_prototypes=4,
+        prototype_embed_dim=16,
+        prototype_top_k=2,
+        prototype_routing_strategy="masked_sinkhorn_topk",
+    )
+    layer = PrototypeContinualASAMLayer(config)
+
+    x = torch.randn(3, 10, 32)
+    output, info = layer(x, return_info=True)
+
+    assert output.shape == x.shape
+    assert torch.allclose(info["prototype_weights"].sum(dim=-1), torch.ones(3), atol=1e-5)
+    assert torch.all(info["prototype_weights"].masked_select(~info["prototype_support"]) == 0.0)
+    assert torch.isfinite(info["transport_loss"])
+    assert not info["support_projection_residual"].requires_grad
+    assert not info["effective_capacity_residual"].requires_grad
+    assert not info["support_weight_leakage"].requires_grad
+
+
+def test_prototype_layer_propagates_masked_sinkhorn_capacity_bias():
+    config = ContinualASAMConfig(
+        dim=32,
+        num_heads=2,
+        dim_head=16,
+        num_prototypes=4,
+        prototype_embed_dim=16,
+        prototype_top_k=2,
+        prototype_routing_strategy="masked_sinkhorn_topk",
+        prototype_masked_sinkhorn_capacity_bias=0.75,
+    )
+    layer = PrototypeContinualASAMLayer(config)
+
+    assert layer.continual_config.prototype_masked_sinkhorn_capacity_bias == 0.75
+    assert layer.prototype_gate.masked_sinkhorn_capacity_bias == 0.75
 
 
 def test_prototype_routing_is_topk_sparse_and_memory_biased():
@@ -483,6 +983,7 @@ def test_prototype_hyperparameter_round_trip_tracks_merge_controls():
     model.set_prototype_hyperparameters(
         prototype_prior_strength=1.5,
         prototype_capacity_blend=0.4,
+        prototype_masked_sinkhorn_capacity_bias=0.8,
         prototype_relocation_strength=0.6,
         prototype_merge_threshold=0.8,
         prototype_merge_usage_threshold=0.05,
@@ -491,6 +992,7 @@ def test_prototype_hyperparameter_round_trip_tracks_merge_controls():
 
     assert params["prototype_prior_strength"] == 1.5
     assert params["prototype_capacity_blend"] == 0.4
+    assert params["prototype_masked_sinkhorn_capacity_bias"] == 0.8
     assert params["prototype_relocation_strength"] == 0.6
     assert params["prototype_merge_threshold"] == 0.8
     assert params["prototype_merge_usage_threshold"] == 0.05
