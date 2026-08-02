@@ -275,6 +275,37 @@ powershell -ExecutionPolicy Bypass -File scripts/run_paper_continual_suite.ps1 -
 
 This pipeline runs the benchmark, runs the multi-seed ablation, and writes a final suite manifest plus paper-ready summary report.
 
+### Canonical paper artifacts and reproduction
+
+Every number in the paper tables is traceable to a saved artifact under `experiments/paper_suite/`, and the mapping is enforced by `tests/test_paper_artifacts_consistency.py`:
+
+- Table 1 (BPE strategy ablation): `r2_agnews_bpe_3ep.json`
+- Table 2 (operator ablation): `continual_operator_ablation.json`
+- Table 3 (baseline comparison, unified no-replay method rows + ER/A-GEM): `r3_baseline_comparison.json`
+- Single-run diagnostics: `continual_benchmark.json`
+- Bootstrap 95% intervals: `bootstrap_ci.json`
+
+Reproduce Table 1 (BPE, D=128, 3 epochs, 3 seeds):
+
+```bash
+python experiments/run_continual_text_ablation.py --protocol task_incremental_multihead --dataset-name split_ag_news --vocab-size 10000 --dim 128 --num-heads 8 --num-layers 2 --epochs-per-task 3 --num-seeds 3 --max-train-samples 64 --max-val-samples 32 --device cpu --output-json experiments/paper_suite/r2_agnews_bpe_3ep.json
+```
+
+Reproduce Table 3 (byte-level, D=64, 1 epoch, 2 seeds):
+
+```bash
+python experiments/run_baseline_comparison.py --num-seeds 2 --epochs-per-task 1 --dim 64
+```
+
+Reproduce the bootstrap intervals and run the table guards:
+
+```bash
+python experiments/bootstrap_ci.py
+python -m pytest tests/test_paper_artifacts_consistency.py -q
+```
+
+The review-response document for the ICLR-style review is at `docs/ICLR_RESPONSE.md`.
+
 ## Project Structure
 
 ```text
