@@ -1,0 +1,172 @@
+{
+  "config": {
+    "dataset_name": "split_ag_news",
+    "classes_per_task": 2,
+    "label_mode": "local",
+    "max_length": 128,
+    "batch_size": 8,
+    "max_train_samples": 64,
+    "max_val_samples": 32,
+    "vocab_size": 128,
+    "num_workers": 0,
+    "dim": 64,
+    "num_heads": 4,
+    "num_layers": 1,
+    "learning_rate": 0.0003,
+    "epochs_per_task": 1,
+    "num_seeds": 2,
+    "replay_batch_size": 4,
+    "device": "cpu",
+    "output_json": "experiments/paper_suite/r2_baseline_comparison.json",
+    "protocol": "task_incremental_multihead",
+    "head_mode": "multi",
+    "train_task_id_mode": "oracle",
+    "eval_task_id_mode": "oracle",
+    "tokenizer": "char",
+    "num_tasks": 2,
+    "asam_rows_replay_batch_size": 4,
+    "vanilla_rows_replay": "none"
+  },
+  "methods": {
+    "fine_tune": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.484375,
+      "accuracy_std": 0.015625,
+      "forgetting_mean": 0.0,
+      "forgetting_std": 0.0,
+      "backward_transfer_mean": 0.0,
+      "backward_transfer_std": 0.0
+    },
+    "ewc": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.5,
+      "accuracy_std": 0.0,
+      "forgetting_mean": 0.0,
+      "forgetting_std": 0.0,
+      "backward_transfer_mean": 0.0,
+      "backward_transfer_std": 0.0
+    },
+    "si": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.484375,
+      "accuracy_std": 0.015625,
+      "forgetting_mean": 0.0,
+      "forgetting_std": 0.0,
+      "backward_transfer_mean": 0.0,
+      "backward_transfer_std": 0.0
+    },
+    "mas": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.5,
+      "accuracy_std": 0.0,
+      "forgetting_mean": 0.0,
+      "forgetting_std": 0.0,
+      "backward_transfer_mean": 0.0,
+      "backward_transfer_std": 0.0
+    },
+    "task_routing": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.484375,
+      "accuracy_std": 0.046875,
+      "forgetting_mean": 0.125,
+      "forgetting_std": 0.0625,
+      "backward_transfer_mean": -0.125,
+      "backward_transfer_std": 0.0625
+    },
+    "prototype": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.5,
+      "accuracy_std": 0.0,
+      "forgetting_mean": 0.0,
+      "forgetting_std": 0.0,
+      "backward_transfer_mean": 0.0,
+      "backward_transfer_std": 0.0
+    }
+  },
+  "per_seed": {
+    "fine_tune": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.46875,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      }
+    ],
+    "ewc": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      }
+    ],
+    "si": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.46875,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      }
+    ],
+    "mas": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      }
+    ],
+    "task_routing": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.53125,
+        "avg_forgetting": 0.0625,
+        "backward_transfer": -0.0625
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.4375,
+        "avg_forgetting": 0.1875,
+        "backward_transfer": -0.1875
+      }
+    ],
+    "prototype": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.5,
+        "avg_forgetting": 0.0,
+        "backward_transfer": 0.0
+      }
+    ]
+  }
+}
