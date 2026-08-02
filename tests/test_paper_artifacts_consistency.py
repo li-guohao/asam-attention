@@ -46,8 +46,9 @@ def test_canonical_artifacts_exist():
     for name in [
         "r2_agnews_bpe_3ep.json",
         "continual_operator_ablation.json",
-        "r2_baseline_comparison.json",
+        "r3_baseline_comparison.json",
         "continual_benchmark.json",
+        "bootstrap_ci.json",
     ]:
         assert (ARTIFACT_DIR / name).exists(), f"missing canonical artifact: {name}"
 
@@ -86,7 +87,7 @@ def test_table2_matches_operator_ablation():
 
 
 def test_table3_matches_baseline_comparison():
-    data = _load("r2_baseline_comparison.json")
+    data = _load("r3_baseline_comparison.json")
     tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
     for row in data["methods"].values():
         _assert_pairs(
@@ -104,6 +105,20 @@ def test_single_run_diagnostics_match_benchmark():
     tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
     for value in [data["avg_accuracy"], data["avg_forgetting"], data["backward_transfer"]]:
         assert _fmt(value) in tex_clean, f"tex is missing diagnostic value: {_fmt(value)}"
+
+
+def test_abstract_matches_canonical_numbers():
+    tex = PAPER_TEX.read_text(encoding="utf-8")
+    abstract = re.search(r"\\begin\{abstract\}(.*?)\\end\{abstract\}", tex, re.S)
+    assert abstract is not None, "abstract environment not found"
+    abstract_text = abstract.group(1)
+    # Canonical Table 1 numbers that the abstract may cite.
+    for needle in ["0.5104", "0.5312", "0.0000", "0.0417"]:
+        assert needle in abstract_text, f"abstract is missing canonical value: {needle}"
+    # The stitched two-experiment chain and the old overclaim must be gone.
+    for stale in ["0.0625", "0.4844", "0.5156", "connect routing geometry diagnostics to forgetting"]:
+        assert stale not in abstract_text, f"stale/stitched claim still in abstract: {stale}"
+    assert "left as future work" in abstract_text, "abstract should scope correlation analysis as future work"
 
 
 def test_stale_unbacked_numbers_removed():
