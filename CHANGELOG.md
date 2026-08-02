@@ -2,6 +2,25 @@
 
 All notable changes to ASAM (Adaptive Sparse Attention Mechanism).
 
+## [1.2.1] - 2026-08-02
+
+### Fixed
+- Paper reproducibility: reran the BPE strategy table (`r2_agnews_bpe_3ep.json`,
+  3 epochs, 3 seeds) and the EWC/SI/MAS baseline comparison
+  (`r2_baseline_comparison.json`, unified task-incremental multi-head protocol);
+  the paper tables and abstract now match the stored artifacts.
+- Theory section: Theorem 1 is now a valid $\epsilon$-consistency statement;
+  the unproven forgetting corollary was replaced with an explicitly informal
+  surrogate-control interpretation.
+- `datasets/text_dataset.py`: synthetic dataset fallback is disabled by default;
+  set `ASAM_ALLOW_DATASET_FALLBACK=1` to allow it. Datasets now expose a
+  `data_source` attribute (`huggingface` / `synthetic_fallback`).
+- `datasets/text_dataset.py`: `_fetch_raw_texts` now uses the `text` field when
+  `title`/`description` are absent, so BPE tokenizer training uses real
+  headlines with current AG News cache formats.
+- Added `paper/references.bib` and a table-vs-artifact consistency test.
+- README release link updated to `v1.2.0`.
+
 ## [1.2.0] - 2026-04-29
 
 ### Added

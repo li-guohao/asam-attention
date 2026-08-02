@@ -29,7 +29,7 @@ This repository includes:
 
 ## Latest Update
 
-The latest release, [`v1.1.1`](https://github.com/li-guohao/asam-attention/releases/tag/v1.1.1), focuses on:
+The latest release, [`v1.2.0`](https://github.com/li-guohao/asam-attention/releases/tag/v1.2.0), focuses on:
 
 - sparse path optimizations,
 - pattern construction acceleration,
@@ -76,6 +76,7 @@ flowchart TD
 ### 1. `ASAMLayer`
 
 The main adaptive sparse attention layer with gating and pattern selection.
+In this default layer, adaptive gating is a differentiable sparse/dense soft mixture; true compute savings are provided by the optimized sparse paths below.
 
 ```python
 from asam import ASAMLayer, ASAMConfig
@@ -236,13 +237,29 @@ python experiments/run_continual_text_benchmark.py --dataset-name split_ag_news 
 
 This exports raw JSON metrics, plots, and a Markdown report with theory diagnostics and adaptation traces.
 
+The default benchmark configuration is `task_incremental_multihead`: local labels, per-task classifier heads, and oracle task IDs at evaluation. For stricter class-incremental reruns, use global labels and a single classifier head:
+
+```bash
+python experiments/run_continual_text_benchmark.py --protocol class_incremental_singlehead --label-mode global --head-mode single --eval-task-id-mode none --dataset-name split_ag_news --routing-mode prototype --output-json experiments/continual_singlehead.json
+```
+
+For the strict task-agnostic single-head path, hide task IDs from both training forward passes and evaluation:
+
+```bash
+python experiments/run_continual_text_ablation.py --protocol task_agnostic_singlehead --label-mode global --head-mode single --train-task-id-mode none --eval-task-id-mode none --dataset-name split_ag_news --output-json experiments/continual_task_agnostic.json
+```
+
+This is a strict no-task-ID model protocol, not a boundary-free streaming benchmark: task partitions are still used to compute continual metrics and exported stage-wise diagnostics.
+
+A small class-incremental protocol-validation artifact is available at `experiments/paper_suite/class_incremental_singlehead_smoke.json` with `avg_accuracy=0.2188` and `avg_forgetting=0.0625` under cached AG News, one seed, char vocabulary 128, and 128/64 train/validation caps. A stricter task-agnostic multi-seed smoke artifact is available at `experiments/paper_suite/task_agnostic_singlehead_ablation_smoke.json`; it uses global labels, a single head, `train_task_id_mode=none`, `eval_task_id_mode=none`, BPE vocabulary 10,000, two seeds, and 128/64 train/validation caps. It skips both task-routed and task-conditioned dual-transport strategies as incompatible. Treat these as protocol-plumbing checks, not replacements for the paper-scale BPE tables.
+
 ### Run the multi-seed ablation suite
 
 ```bash
 python experiments/run_continual_text_ablation.py --output-json experiments/continual_ablation.json --num-seeds 2
 ```
 
-This compares `task_routing`, `no_adaptation`, `correlation`, and `meta_secant`, and exports aggregated JSON / CSV / PNG / Markdown artifacts.
+This compares compatible strategies from `task_routing`, `no_adaptation`, `correlation`, `dual_transport`, and `meta_secant`, and exports aggregated JSON / CSV / PNG / Markdown artifacts. Strict no-task-ID protocols skip task-conditioned strategies, including `task_routing` and `dual_transport`, and record the reason in the summary.
 
 ### Run the one-command paper suite
 
