@@ -20,6 +20,28 @@ import random
 import hashlib
 import re
 
+ASAM_FALLBACK_ENV = "ASAM_ALLOW_DATASET_FALLBACK"
+
+
+def _require_fallback_permission(dataset_name: str) -> None:
+    """Raise unless the synthetic dataset fallback is explicitly allowed."""
+    allowed = os.getenv(ASAM_FALLBACK_ENV, "0").strip().lower() in {"1", "true", "yes"}
+    if not allowed:
+        raise RuntimeError(
+            f"Failed to load real '{dataset_name}' data; the synthetic fallback is disabled. "
+            f"Set {ASAM_FALLBACK_ENV}=1 to explicitly allow keyword-synthesized dummy data, "
+            "or fix the data source (install the 'datasets' package / network / cache)."
+        )
+    print(
+        f"WARNING: using synthetic fallback data for '{dataset_name}' "
+        f"(enabled via {ASAM_FALLBACK_ENV}=1)."
+    )
+
+
+def _with_source(dataset: "LongTextDataset", source: str) -> "LongTextDataset":
+    dataset.data_source = source
+    return dataset
+
 
 class LongTextDataset(Dataset):
     """Base class for long text datasets."""
@@ -31,12 +53,15 @@ class LongTextDataset(Dataset):
         tokenizer,
         max_length: int = 4096,
         stride: Optional[int] = None,
+        vocab_size: Optional[int] = None,
     ):
         self.texts = texts
         self.labels = labels
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.stride = stride or max_length // 2
+        self.vocab_size = vocab_size or 10000
+        self.data_source = "unknown"
 
     def __len__(self):
         return len(self.texts)
@@ -45,16 +70,15 @@ class LongTextDataset(Dataset):
         text = self.texts[idx]
         label = self.labels[idx]
 
-        # Tokenize
         tokens = self.tokenizer.encode(text)
+        tokens = [min(t, self.vocab_size - 1) for t in tokens]
 
-        # Truncate or pad
         if len(tokens) > self.max_length:
-            # Random crop for training
-            start = random.randint(0, len(tokens) - self.max_length)
+            max_start = len(tokens) - self.max_length
+            crop_key = f"{idx}:{text}".encode("utf-8", errors="ignore")
+            start = int(hashlib.sha256(crop_key).hexdigest(), 16) % (max_start + 1)
             tokens = tokens[start : start + self.max_length]
         else:
-            # Pad
             tokens = tokens + [0] * (self.max_length - len(tokens))
 
         return torch.tensor(tokens, dtype=torch.long), torch.tensor(
@@ -85,16 +109,16 @@ class IMDBLongDataset(LongTextDataset):
             if tokenizer is None:
                 tokenizer = SimpleCharTokenizer()
 
-            return cls(texts, labels, tokenizer, max_length)
+            return _with_source(cls(texts, labels, tokenizer, max_length), "huggingface")
 
-        except ImportError:
-            print("Please install datasets: pip install datasets")
-            # Return dummy data for testing
+        except Exception as exc:
+            print(f"Error loading IMDB ({type(exc).__name__}: {exc}); fallback disabled by default.")
+            _require_fallback_permission("imdb")
             texts = ["This is a sample review. " * 100] * 100
             labels = [0, 1] * 50
             if tokenizer is None:
                 tokenizer = SimpleCharTokenizer()
-            return cls(texts, labels, tokenizer, max_length)
+            return _with_source(cls(texts, labels, tokenizer, max_length), "synthetic_fallback")
 
 
 class AGNewsDataset(LongTextDataset):
@@ -140,9 +164,13 @@ class AGNewsDataset(LongTextDataset):
 
         try:
             from datasets import load_dataset
-        except ImportError:
-            print("datasets not installed, using fallback AG News samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+        except ImportError as exc:
+            print(f"datasets not installed ({exc}); fallback disabled by default.")
+            _require_fallback_permission("ag_news")
+            return _with_source(
+                cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
+                "synthetic_fallback",
+            )
 
         try:
             hf_token = (
@@ -191,10 +219,14 @@ class AGNewsDataset(LongTextDataset):
                             break
                     if len(texts) >= max_samples:
                         break
-            return cls(texts, labels, tokenizer, max_length)
+            return _with_source(cls(texts, labels, tokenizer, max_length), "huggingface")
         except Exception as exc:
-            print(f"Error loading AG News ({type(exc).__name__}: {exc}); using fallback samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+            print(f"Error loading AG News ({type(exc).__name__}: {exc}); fallback disabled by default.")
+            _require_fallback_permission("ag_news")
+            return _with_source(
+                cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
+                "synthetic_fallback",
+            )
 
 
 
@@ -310,9 +342,13 @@ class DBPediaDataset(LongTextDataset):
 
         try:
             from datasets import load_dataset
-        except ImportError:
-            print("datasets not installed, using fallback DBPedia samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+        except ImportError as exc:
+            print(f"datasets not installed ({exc}); fallback disabled by default.")
+            _require_fallback_permission("dbpedia_14")
+            return _with_source(
+                cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
+                "synthetic_fallback",
+            )
 
         try:
             hf_token = (
@@ -358,41 +394,97 @@ class DBPediaDataset(LongTextDataset):
                             break
                     if len(texts) >= max_samples:
                         break
-            return cls(texts, labels, tokenizer, max_length)
+            return _with_source(cls(texts, labels, tokenizer, max_length), "huggingface")
         except Exception as exc:
-            print(f"Error loading DBPedia ({type(exc).__name__}: {exc}); using fallback samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+            print(f"Error loading DBPedia ({type(exc).__name__}: {exc}); fallback disabled by default.")
+            _require_fallback_permission("dbpedia_14")
+            return _with_source(
+                cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
+                "synthetic_fallback",
+            )
 
 class ContinualSubsetDataset(Dataset):
-    """Subset wrapper that remaps labels for class-incremental tasks."""
+    """Subset wrapper for continual classification tasks."""
 
-    def __init__(self, base_dataset: LongTextDataset, indices: List[int], label_map: Dict[int, int], task_id: int):
+    def __init__(
+        self,
+        base_dataset: LongTextDataset,
+        indices: List[int],
+        label_map: Dict[int, int],
+        task_id: int,
+        label_mode: str = "local",
+    ):
+        if label_mode not in {"local", "global"}:
+            raise ValueError("label_mode must be either 'local' or 'global'")
         self.base_dataset = base_dataset
         self.indices = indices
         self.label_map = label_map
         self.task_id = task_id
+        self.label_mode = label_mode
+        self.task_labels = sorted(label_map.keys())
+        self.output_labels = (
+            sorted(label_map.values()) if label_mode == "local" else self.task_labels
+        )
 
     def __len__(self):
         return len(self.indices)
 
     def __getitem__(self, idx: int):
         tokens, label = self.base_dataset[self.indices[idx]]
-        remapped_label = self.label_map[int(label.item())]
-        return tokens, torch.tensor(remapped_label, dtype=torch.long), torch.tensor(self.task_id, dtype=torch.long)
+        raw_label = int(label.item())
+        output_label = self.label_map[raw_label] if self.label_mode == "local" else raw_label
+        return tokens, torch.tensor(output_label, dtype=torch.long), torch.tensor(self.task_id, dtype=torch.long)
 
 
 def build_split_classification_tasks(
     dataset: LongTextDataset,
     classes_per_task: int = 2,
+    label_mode: str = "local",
 ) -> List[Dataset]:
+    if label_mode not in {"local", "global"}:
+        raise ValueError("label_mode must be either 'local' or 'global'")
     unique_labels = sorted(set(int(label) for label in dataset.labels))
     tasks = []
     for task_id, start_index in enumerate(range(0, len(unique_labels), classes_per_task)):
         task_labels = unique_labels[start_index : start_index + classes_per_task]
         label_map = {label: mapped_index for mapped_index, label in enumerate(task_labels)}
         indices = [index for index, label in enumerate(dataset.labels) if int(label) in label_map]
-        tasks.append(ContinualSubsetDataset(dataset, indices, label_map, task_id))
+        tasks.append(ContinualSubsetDataset(dataset, indices, label_map, task_id, label_mode=label_mode))
     return tasks
+
+
+def _fetch_raw_texts(dataset_name: str, split: str, max_samples: Optional[int] = None) -> List[str]:
+    """Fetch raw text strings for tokenizer training."""
+    from datasets import load_dataset
+    texts: List[str] = []
+    if dataset_name == "split_ag_news":
+        ds = load_dataset("ag_news", split=split)
+        for item in ds:
+            if "title" in item and "description" in item:
+                text = f"Headline: {item.get('title','')}\n\nArticle: {item.get('description','')}"
+            elif "text" in item:
+                text = str(item["text"])
+            else:
+                text = ""
+            texts.append(text)
+            if max_samples and len(texts) >= max_samples:
+                break
+    elif dataset_name == "split_dbpedia":
+        ds = load_dataset("dbpedia_14", split=split)
+        for item in ds:
+            title = str(item.get("title") or item.get("name") or "")
+            content = str(item.get("content") or item.get("text") or "")
+            texts.append(f"Title: {title}\n\nContent: {content}" if title else content)
+            if max_samples and len(texts) >= max_samples:
+                break
+    elif dataset_name == "split_arxiv":
+        ds = load_dataset("scientific_papers", "arxiv", split=split)
+        for item in ds:
+            text = f"Title: {str(item.get('article', item.get('abstract','')))[:2000]}"
+            texts.append(text)
+            if max_samples and len(texts) >= max_samples:
+                break
+    return texts
 
 
 def get_continual_dataloaders(
@@ -403,45 +495,75 @@ def get_continual_dataloaders(
     num_workers: int = 0,
     max_train_samples: Optional[int] = None,
     max_val_samples: Optional[int] = None,
+    tokenizer=None,
+    tokenizer_vocab_size: int = 10000,
+    use_char_tokenizer: bool = False,
+    label_mode: str = "local",
 ):
+    if tokenizer is None:
+        if use_char_tokenizer:
+            tokenizer = SimpleCharTokenizer()
+        else:
+            tokenizer = BPETokenizer(vocab_size=tokenizer_vocab_size)
+            try:
+                raw_texts = _fetch_raw_texts(dataset_name, "train", max_samples=max_train_samples)
+                if raw_texts:
+                    tokenizer.train(raw_texts[:min(len(raw_texts), 5000)])
+            except Exception:
+                pass
+
     if dataset_name == "split_ag_news":
         train_dataset = AGNewsDataset.load(
             split="train",
             max_length=max_length,
             max_samples=max_train_samples,
+            tokenizer=tokenizer,
         )
         val_dataset = AGNewsDataset.load(
             split="test",
             max_length=max_length,
             max_samples=max_val_samples,
+            tokenizer=tokenizer,
         )
     elif dataset_name == "split_arxiv":
         train_dataset = ArXivDataset.load(
             split="train",
             max_length=max_length,
             max_samples=max_train_samples,
+            tokenizer=tokenizer,
         )
         val_dataset = ArXivDataset.load(
             split="test",
             max_length=max_length,
             max_samples=max_val_samples,
+            tokenizer=tokenizer,
         )
     elif dataset_name == "split_dbpedia":
         train_dataset = DBPediaDataset.load(
             split="train",
             max_length=max_length,
             max_samples=max_train_samples,
+            tokenizer=tokenizer,
         )
         val_dataset = DBPediaDataset.load(
             split="test",
             max_length=max_length,
             max_samples=max_val_samples,
+            tokenizer=tokenizer,
         )
     else:
         raise ValueError(f"Unknown continual dataset: {dataset_name}")
 
-    train_tasks = build_split_classification_tasks(train_dataset, classes_per_task=classes_per_task)
-    val_tasks = build_split_classification_tasks(val_dataset, classes_per_task=classes_per_task)
+    train_tasks = build_split_classification_tasks(
+        train_dataset,
+        classes_per_task=classes_per_task,
+        label_mode=label_mode,
+    )
+    val_tasks = build_split_classification_tasks(
+        val_dataset,
+        classes_per_task=classes_per_task,
+        label_mode=label_mode,
+    )
 
     train_loaders = [
         DataLoader(task_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
@@ -670,9 +792,13 @@ class ArXivDataset(LongTextDataset):
 
         try:
             from datasets import load_dataset
-        except ImportError:
-            print("datasets not installed, using fallback ArXiv samples...")
-            return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+        except ImportError as exc:
+            print(f"datasets not installed ({exc}); fallback disabled by default.")
+            _require_fallback_permission("arxiv")
+            return _with_source(
+                cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
+                "synthetic_fallback",
+            )
 
         dataset_candidates = [
             ("scientific_papers", "arxiv"),
@@ -702,16 +828,23 @@ class ArXivDataset(LongTextDataset):
                         break
 
                 if texts:
-                    return cls(texts, labels, tokenizer, max_length)
+                    return _with_source(
+                        cls(texts, labels, tokenizer, max_length),
+                        "huggingface",
+                    )
 
                 load_errors.append(f"{dataset_name}: no valid samples after filtering")
             except Exception as exc:
                 load_errors.append(f"{dataset_name}: {exc}")
 
-        print("Error loading ArXiv datasets; using fallback samples...")
+        print("Error loading ArXiv datasets; fallback disabled by default.")
+        _require_fallback_permission("arxiv")
         for error in load_errors:
             print(f"  - {error}")
-        return cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples)
+        return _with_source(
+            cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
+            "synthetic_fallback",
+        )
 
 
 class SyntheticLongRangeDataset(Dataset):
@@ -835,33 +968,70 @@ class SimpleCharTokenizer:
 
 
 class BPETokenizer:
-    """BPE tokenizer wrapper (requires tokenizers library)."""
+    """BPE tokenizer wrapper.
+
+    Uses HuggingFace tokenizers for BPE, falling back to a word-level
+    tokenizer built from training texts when tokenizers is unavailable.
+    """
 
     def __init__(self, vocab_size: int = 10000):
         self.vocab_size = vocab_size
+        self._word_to_id: Dict[str, int] = {}
+        self._id_to_word: Dict[int, str] = {}
+        self._trained = False
+        self._use_hf = False
         try:
             from tokenizers import Tokenizer, models, pre_tokenizers, trainers
-
-            self.tokenizer = Tokenizer(models.BPE())
-            self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
-            self.trainer = trainers.BpeTrainer(vocab_size=vocab_size)
+            self._hf_tokenizer = Tokenizer(models.BPE())
+            self._hf_tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+            self._hf_trainer = trainers.BpeTrainer(
+                vocab_size=vocab_size,
+                special_tokens=["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"],
+            )
+            self._use_hf = True
         except ImportError:
-            print("tokenizers not installed, using SimpleCharTokenizer")
-            self.tokenizer = SimpleCharTokenizer(vocab_size)
-
-    def encode(self, text: str) -> List[int]:
-        if isinstance(self.tokenizer, SimpleCharTokenizer):
-            return self.tokenizer.encode(text)
-        return self.tokenizer.encode(text).ids
-
-    def decode(self, tokens: List[int]) -> str:
-        if isinstance(self.tokenizer, SimpleCharTokenizer):
-            return self.tokenizer.decode(tokens)
-        return self.tokenizer.decode(tokens)
+            self._hf_tokenizer = None
+            self._hf_trainer = None
 
     def train(self, texts: List[str]):
-        if not isinstance(self.tokenizer, SimpleCharTokenizer):
-            self.tokenizer.train_from_iterator(texts, trainer=self.trainer)
+        if self._use_hf and self._hf_tokenizer is not None:
+            self._hf_tokenizer.train_from_iterator(texts, trainer=self._hf_trainer)
+        else:
+            word_freq: Dict[str, int] = {}
+            for text in texts:
+                for word in text.lower().split():
+                    word_freq[word] = word_freq.get(word, 0) + 1
+            vocab = sorted(word_freq.items(), key=lambda x: -x[1])
+            vocab = vocab[:self.vocab_size - 5]
+            specials = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
+            for i, tok in enumerate(specials):
+                self._word_to_id[tok] = i
+                self._id_to_word[i] = tok
+            for i, (word, _) in enumerate(vocab):
+                idx = i + len(specials)
+                self._word_to_id[word] = idx
+                self._id_to_word[idx] = word
+        self._trained = True
+
+    def encode(self, text: str) -> List[int]:
+        if self._use_hf and self._hf_tokenizer is not None:
+            return self._hf_tokenizer.encode(text).ids
+        if not self._trained:
+            return [ord(c) % self.vocab_size for c in text]
+        result = []
+        for word in text.lower().split():
+            result.append(self._word_to_id.get(word, self._word_to_id.get("[UNK]", 1)))
+        return result
+
+    def decode(self, tokens: List[int]) -> str:
+        if self._use_hf and self._hf_tokenizer is not None:
+            return self._hf_tokenizer.decode(tokens)
+        if not self._id_to_word:
+            return " ".join(str(t) for t in tokens)
+        return " ".join(self._id_to_word.get(t, "[UNK]") for t in tokens)
+
+    def vocab_size_property(self) -> int:
+        return self.vocab_size
 
 
 def get_dataloader(

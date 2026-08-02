@@ -1,0 +1,112 @@
+"""Guard tests: every paper table number must match the canonical artifact.
+
+If a table is edited without regenerating the artifact (or vice versa), one of
+these tests fails. The canonical artifacts are:
+
+- Table 1 (strategy ablation, BPE): experiments/paper_suite/r2_agnews_bpe_3ep.json
+- Table 2 (operator ablation):       experiments/paper_suite/continual_operator_ablation.json
+- Table 3 (baseline comparison):     experiments/paper_suite/r2_baseline_comparison.json
+- Single-run diagnostics:            experiments/paper_suite/continual_benchmark.json
+"""
+
+import json
+import re
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PAPER_TEX = REPO_ROOT / "paper" / "continual_asam.tex"
+ARTIFACT_DIR = REPO_ROOT / "experiments" / "paper_suite"
+
+
+def _load(name):
+    with open(ARTIFACT_DIR / name, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _normalize_tex(text):
+    """Strip LaTeX formatting so values can be matched verbatim."""
+    text = text.replace("+", "")
+    text = re.sub(r"\\mathbf\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\texttt\{([^{}]*)\}", r"\1", text)
+    text = text.replace("\\_", "_")
+    return text
+
+
+def _fmt(value):
+    return f"{value:.4f}"
+
+
+def _assert_pairs(tex_clean, pairs):
+    for mean, std in pairs:
+        needle = f"{_fmt(mean)} \\pm {_fmt(std)}"
+        assert needle in tex_clean, f"tex is missing expected value pair: {needle!r}"
+
+
+def test_canonical_artifacts_exist():
+    for name in [
+        "r2_agnews_bpe_3ep.json",
+        "continual_operator_ablation.json",
+        "r2_baseline_comparison.json",
+        "continual_benchmark.json",
+    ]:
+        assert (ARTIFACT_DIR / name).exists(), f"missing canonical artifact: {name}"
+
+
+def test_table1_matches_bpe_rerun():
+    data = _load("r2_agnews_bpe_3ep.json")
+    tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
+    by_name = {row["strategy"]: row for row in data["aggregated_strategies"]}
+    task = by_name["task_routing"]
+    proto = by_name["no_adaptation"]
+    _assert_pairs(
+        tex_clean,
+        [
+            (task["avg_accuracy_mean"], task["avg_accuracy_std"]),
+            (task["avg_forgetting_mean"], task["avg_forgetting_std"]),
+            (proto["avg_accuracy_mean"], proto["avg_accuracy_std"]),
+            (proto["avg_forgetting_mean"], proto["avg_forgetting_std"]),
+            (proto["final_transport_gap_mean"], proto["final_transport_gap_std"]),
+        ],
+    )
+
+
+def test_table2_matches_operator_ablation():
+    data = _load("continual_operator_ablation.json")
+    tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
+    for row in data["aggregated_strategies"]:
+        _assert_pairs(
+            tex_clean,
+            [
+                (row["avg_accuracy_mean"], row["avg_accuracy_std"]),
+                (row["avg_forgetting_mean"], row["avg_forgetting_std"]),
+                (row["final_transport_gap_mean"], row["final_transport_gap_std"]),
+                (row["final_transport_loss_mean"], row["final_transport_loss_std"]),
+            ],
+        )
+
+
+def test_table3_matches_baseline_comparison():
+    data = _load("r2_baseline_comparison.json")
+    tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
+    for row in data["methods"].values():
+        _assert_pairs(
+            tex_clean,
+            [
+                (row["accuracy_mean"], row["accuracy_std"]),
+                (row["forgetting_mean"], row["forgetting_std"]),
+                (row["backward_transfer_mean"], row["backward_transfer_std"]),
+            ],
+        )
+
+
+def test_single_run_diagnostics_match_benchmark():
+    data = _load("continual_benchmark.json")
+    tex_clean = _normalize_tex(PAPER_TEX.read_text(encoding="utf-8"))
+    for value in [data["avg_accuracy"], data["avg_forgetting"], data["backward_transfer"]]:
+        assert _fmt(value) in tex_clean, f"tex is missing diagnostic value: {_fmt(value)}"
+
+
+def test_stale_unbacked_numbers_removed():
+    tex = PAPER_TEX.read_text(encoding="utf-8")
+    for stale in ["0.5521", "0.5469", "0.3203", "0.6250"]:
+        assert stale not in tex, f"stale/unbacked number still present in tex: {stale}"
