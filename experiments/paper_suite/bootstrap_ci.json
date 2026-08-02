@@ -1,0 +1,80 @@
+{
+  "config": {
+    "n_boot": 2000,
+    "seed": 0,
+    "table1_artifact": "r2_agnews_bpe_3ep.json",
+    "table3_artifact": "r3_baseline_comparison.json"
+  },
+  "entries": [
+    {
+      "comparison": "table1 forgetting prototype - task",
+      "metric": "diff",
+      "mean": -0.0418125,
+      "ci_low": -0.10416666666666666,
+      "ci_high": 0.020833333333333336,
+      "n_a": 3,
+      "n_b": 3
+    },
+    {
+      "comparison": "table1 accuracy prototype - task",
+      "metric": "diff",
+      "mean": -0.02078645833333334,
+      "ci_low": -0.05208333333333337,
+      "ci_high": 0.01041666666666674,
+      "n_a": 3,
+      "n_b": 3
+    },
+    {
+      "comparison": "table3 forgetting prototype - fine_tune",
+      "metric": "diff",
+      "mean": 0.03115625,
+      "ci_low": 0.0,
+      "ci_high": 0.0625,
+      "n_a": 2,
+      "n_b": 2
+    },
+    {
+      "comparison": "table3 accuracy prototype - fine_tune",
+      "metric": "diff",
+      "mean": 0.03128125,
+      "ci_low": 0.0,
+      "ci_high": 0.0625,
+      "n_a": 2,
+      "n_b": 2
+    },
+    {
+      "comparison": "table3 forgetting prototype - ER",
+      "metric": "diff",
+      "mean": 0.03115625,
+      "ci_low": 0.0,
+      "ci_high": 0.0625,
+      "n_a": 2,
+      "n_b": 2
+    },
+    {
+      "comparison": "table3 accuracy prototype - ER",
+      "metric": "diff",
+      "mean": 0.015578125,
+      "ci_low": 0.0,
+      "ci_high": 0.03125,
+      "n_a": 2,
+      "n_b": 2
+    },
+    {
+      "comparison": "table3 forgetting fine_tune (CI only)",
+      "metric": "diff",
+      "mean": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.0,
+      "n": 2
+    },
+    {
+      "comparison": "table3 accuracy prototype (CI only)",
+      "metric": "diff",
+      "mean": 0.515625,
+      "ci_low": 0.5,
+      "ci_high": 0.53125,
+      "n": 2
+    }
+  ]
+}

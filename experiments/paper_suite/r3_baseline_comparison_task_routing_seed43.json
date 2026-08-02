@@ -1,0 +1,247 @@
+{
+  "config": {
+    "protocol": "task_incremental_multihead",
+    "dataset_name": "split_ag_news",
+    "classes_per_task": 2,
+    "label_mode": "local",
+    "head_mode": "multi",
+    "train_task_id_mode": "oracle",
+    "eval_task_id_mode": "oracle",
+    "max_length": 128,
+    "batch_size": 8,
+    "max_train_samples": 64,
+    "max_val_samples": 32,
+    "num_workers": 0,
+    "vocab_size": 128,
+    "dim": 64,
+    "num_heads": 4,
+    "num_layers": 1,
+    "top_k_patterns": 2,
+    "routing_mode": "task",
+    "prototype_routing_strategy": "sinkhorn_topk",
+    "num_prototypes": 0,
+    "prototype_slots_per_task": 2,
+    "prototype_top_k": 2,
+    "learning_rate": 0.0003,
+    "epochs_per_task": 1,
+    "overlap_weight": 0.1,
+    "stability_weight": 0.1,
+    "balance_weight": 0.05,
+    "diversity_weight": 0.05,
+    "transport_weight": 0.05,
+    "replay_batch_size": 0,
+    "prototype_reset_threshold": 0.01,
+    "prototype_split_threshold": 0.2,
+    "prototype_noise_scale": 0.05,
+    "prototype_merge_threshold": 0.9,
+    "prototype_merge_usage_threshold": 0.1,
+    "prototype_masked_sinkhorn_candidate_k": 0,
+    "prototype_birkhoff_transport_strength": 0.02,
+    "prototype_birkhoff_adaptive_gate": true,
+    "prototype_birkhoff_gap_target": 0.03,
+    "prototype_birkhoff_max_applied_offdiag_mass": 0.006,
+    "prototype_birkhoff_gap_tolerance": 0.0,
+    "prototype_birkhoff_min_effective_strength": 0.0001,
+    "prototype_prior_strength": 1.0,
+    "prototype_capacity_blend": 0.5,
+    "prototype_masked_sinkhorn_capacity_bias": 0.0,
+    "prototype_relocation_strength": 0.75,
+    "adaptive_hyperparameters": false,
+    "adaptation_strategy": "correlation",
+    "adaptation_warmup_stages": 1,
+    "target_stage_forgetting": 0.05,
+    "prior_strength_step": 0.25,
+    "capacity_blend_step": 0.1,
+    "relocation_strength_step": 0.1,
+    "meta_transport_weight": 0.5,
+    "meta_transport_loss_weight": 0.25,
+    "meta_excess_weight": 0.25,
+    "meta_routing_weight": 0.25,
+    "meta_secant_mix": 0.25,
+    "meta_secant_eps": 0.001,
+    "transport_weight_step": 0.5,
+    "prototype_topk_step": 2.5,
+    "dual_transport_trend_weight": 0.5,
+    "dual_transport_gap_weight": 0.25,
+    "dual_transport_loss_weight": 0.25,
+    "dual_topk_min_stages": 3,
+    "dual_topk_threshold": 0.35,
+    "device": "cpu",
+    "seed": 43,
+    "output_json": "experiments\\paper_suite\\r3_baseline_comparison_task_routing_seed43.json"
+  },
+  "resolved_prototype_layout": {
+    "num_prototypes": 4,
+    "prototype_top_k": 2,
+    "prototype_slots_per_task": 2
+  },
+  "num_tasks": 2,
+  "num_output_classes": 2,
+  "accuracy_matrix": [
+    [
+      0.4375,
+      0.0
+    ],
+    [
+      0.4375,
+      0.5
+    ]
+  ],
+  "stage_training_metrics": [
+    {
+      "train_loss": 0.6908324062824249,
+      "overlap_loss": 0.0,
+      "stability_loss": 0.0001329347269347636,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "weighted_transport_loss": 0.0,
+      "effective_transport_weight": 0.05,
+      "routing_stability_loss": 0.0
+    },
+    {
+      "train_loss": 0.741693302989006,
+      "overlap_loss": 0.30757052451372147,
+      "stability_loss": 6.005445084156236e-05,
+      "balance_loss": 0.0,
+      "diversity_loss": 0.0,
+      "transport_loss": 0.0,
+      "weighted_transport_loss": 0.0,
+      "effective_transport_weight": 0.05,
+      "routing_stability_loss": 0.0
+    }
+  ],
+  "prototype_lifecycle": [],
+  "prototype_diagnostics": [],
+  "theory_diagnostics": {
+    "stage_forgetting": [
+      0.0,
+      0.0
+    ],
+    "stage_avg_accuracy": [
+      0.4375,
+      0.46875
+    ],
+    "stage_task_forgetting": [
+      [
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "stage_transport_gap": [],
+    "stage_max_transport_gap": [],
+    "stage_routing_stability_loss": [
+      0.0,
+      0.0
+    ],
+    "stage_stability_loss": [
+      0.0001329347269347636,
+      6.005445084156236e-05
+    ],
+    "stage_overlap_loss": [
+      0.0,
+      0.30757052451372147
+    ],
+    "stage_transport_loss": [
+      0.0,
+      0.0
+    ],
+    "stage_weighted_transport_loss": [
+      0.0,
+      0.0
+    ],
+    "stage_candidate_support_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_support_projection_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_support_residual_delta": [
+      0.0,
+      0.0
+    ],
+    "stage_target_capacity_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_effective_capacity_residual": [
+      0.0,
+      0.0
+    ],
+    "stage_support_density": [
+      0.0,
+      0.0
+    ],
+    "stage_support_size": [
+      0.0,
+      0.0
+    ],
+    "stage_support_active_prototypes": [
+      0.0,
+      0.0
+    ],
+    "stage_support_weight_leakage": [
+      0.0,
+      0.0
+    ],
+    "stage_capacity_bias_selection_rate": [
+      0.0,
+      0.0
+    ],
+    "stage_task_transport_gap": [],
+    "stage_task_max_transport_gap": [],
+    "stage_task_transport_loss": [],
+    "stage_merge_count": [],
+    "stage_birkhoff_base_strength": [],
+    "stage_birkhoff_strength": [],
+    "stage_birkhoff_gate_factor": [],
+    "stage_birkhoff_offdiag_mass": [],
+    "stage_birkhoff_applied_offdiag_mass": [],
+    "stage_birkhoff_row_error": [],
+    "stage_birkhoff_col_error": [],
+    "stage_birkhoff_gap_delta": [],
+    "stage_mean_abs_excess": [],
+    "stage_routing_entropy": [],
+    "forgetting_correlations": {
+      "routing_stability": null,
+      "stability_loss": null,
+      "transport_gap": null,
+      "transport_loss": null,
+      "weighted_transport_loss": null,
+      "candidate_support_residual": null,
+      "support_projection_residual": null,
+      "support_residual_delta": null,
+      "target_capacity_residual": null,
+      "effective_capacity_residual": null,
+      "support_density": null,
+      "support_size": null,
+      "support_active_prototypes": null,
+      "support_weight_leakage": null,
+      "capacity_bias_selection_rate": null,
+      "max_transport_gap": null,
+      "mean_abs_excess": null,
+      "merge_count": null,
+      "routing_entropy": null
+    }
+  },
+  "hyperparameter_history": [],
+  "final_hyperparameters": {
+    "prototype_prior_strength": 0.0,
+    "prototype_capacity_blend": 0.0,
+    "prototype_masked_sinkhorn_capacity_bias": 0.0,
+    "prototype_relocation_strength": 0.0,
+    "prototype_merge_threshold": 0.0,
+    "prototype_merge_usage_threshold": 0.0,
+    "transport_weight": 0.05
+  },
+  "avg_accuracy": 0.46875,
+  "avg_forgetting": 0.0,
+  "backward_transfer": 0.0,
+  "plot_path": "experiments\\paper_suite\\r3_baseline_comparison_task_routing_seed43_plots.png",
+  "report_path": "experiments\\paper_suite\\r3_baseline_comparison_task_routing_seed43_report.md"
+}
