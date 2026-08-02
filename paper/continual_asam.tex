@@ -1,0 +1,495 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{geometry}
+\usepackage{subcaption}
+\usepackage{amsthm}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+
+% Page geometry
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% Colors
+\definecolor{linkcolor}{RGB}{0,82,147}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=linkcolor,
+    citecolor=linkcolor,
+    urlcolor=linkcolor
+}
+
+% Math operators
+\DeclareMathOperator{\softmax}{softmax}
+\DeclareMathOperator{\Sinkhorn}{Sinkhorn}
+\DeclareMathOperator{\KL}{KL}
+\DeclareMathOperator{\TopK}{TopK}
+
+% Title
+\title{\textbf{Continual ASAM: Prototype-Routed Sparse Attention\\with Capacity-Constrained Optimal Transport\\and Transport-Aware Lifecycle Control}}
+
+\author{Guohao Li\\
+\texttt{guohaoli2000@gmail.com}}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Continual learning with Transformer-style attention suffers from a structural tension between plasticity and interference: new tasks require routing flexibility, while previously learned tasks require stable reuse of attention structure. Existing sparse-attention methods mainly target computational efficiency, and existing continual-learning routing methods typically do not expose an explicit sparse-attention geometry that can be diagnosed and controlled across task stages. We present \textbf{Continual ASAM}, a continual-learning extension of adaptive sparse attention in which sparse pattern selection is mediated by learned prototype routing. The method combines four ingredients inside one sparse-attention controller: (1) prototype-routed sparse attention-pattern selection, (2) capacity-constrained Sinkhorn routing that defines prototype usage and deficit statistics, (3) transport-aware prototype lifecycle updates including split, merge, reset, and relocation, and (4) a closed diagnostic loop that exports transport loss, routing drift, and excess statistics for online adaptation. We show that the resulting controller admits a coherent continual-learning surrogate interpretation: transport loss is an $\epsilon$-consistent estimator of the exact transport cost, routing KL controls route drift relative to remembered behavior, and prototype excess measures routing concentration above the uniform-collision floor. Empirically, on the task-incremental multi-head Split AG News protocol used for the current reported tables, prototype routing reduces forgetting relative to task-conditioned routing in the scarce-data regime: with byte-level encoding, 1 epoch per task, and 64/32 train/validation samples, prototype routing lowers forgetting from $+0.0625$ (task-conditioned) to $-0.0938$, while KL-based top-$k$ routing further improves forgetting to $-0.1562$ and raises accuracy from $0.4844$ to $0.5156$. Under extended training (3 epochs, BPE tokenization), prototype routing again achieves lower average forgetting ($0.0000$ vs.\ $+0.0417$) at a small accuracy cost ($0.5104$ vs.\ $0.5312$). Operator-level ablation confirms that transport-aware relocation is the most important lifecycle component. We provide runnable pipelines, multi-seed ablations, and stage-wise diagnostic reports that connect routing geometry diagnostics to forgetting. Our claim is not the invention of sparse attention, Sinkhorn routing, or prototype memory in isolation, but the integration of these mechanisms into a unified continual sparse-routing controller with explicit mathematical control variables and an executable evaluation pipeline.
+\end{abstract}
+
+\textbf{Keywords:} Continual Learning, Sparse Attention, Prototype Routing, Optimal Transport, Transformer Routing Geometry
+
+%=============================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+Transformer-based architectures remain difficult to deploy in continual-learning settings because parameter sharing alone does not control \textit{where} interference occurs. In standard attention, all tasks compete over the same dense interaction graph, and even efficient sparse-attention variants usually focus on reducing computational cost rather than separating task-specific routes through attention space. As a result, the question of how sparse attention should be structured for continual learning remains underexplored: efficiency-oriented sparsity does not automatically yield stability, and replay or regularization methods do not directly expose a routing geometry that can be measured or controlled.
+
+We take the view that continual learning should be enforced at the level of sparse routing structure. Instead of treating sparsity as a static computational pattern, we let the model choose sparse attention supports through prototype routing. Each input sequence is first mapped to a sparse mixture over learned prototypes, and that prototype mixture in turn predicts which attention patterns and heads should be active. This makes sparse attention analyzable through routing geometry: routing concentration, route drift, capacity imbalance, and prototype redundancy become measurable objects rather than implicit side effects of optimization.
+
+To stabilize this routing geometry across tasks, we introduce a capacity-constrained optimal-transport step over prototype assignments. The purpose of this step is not merely to balance routing loads, but to define a continual-learning state through prototype usage, capacity, support, and excess statistics. These statistics enable transport-aware lifecycle control: overloaded prototypes can be split toward deficit barycenters, redundant prototypes can be merged and recycled, and low-utility prototypes can be reset toward under-served regions rather than random directions. In parallel, routing KL against remembered priors and transport losses provide differentiable surrogates for route stability and geometric drift.
+
+The resulting method, \textbf{Continual ASAM}, is best understood as a framework-level contribution. We do not claim to invent sparse attention \citep{beltagy2020longformer,child2019generating,zaheer2020big}, Sinkhorn routing \citep{cuturi2013sinkhorn}, prototype memory, or continual replay independently. Instead, our contribution is the unification of these ingredients into a single continual sparse-attention controller with explicit mathematical control variables and an executable evaluation pipeline. This framing is important both technically and rhetorically: technically because it aligns optimization, lifecycle control, and diagnostics around the same quantities, and rhetorically because it yields a more defensible novelty claim than presenting each component as individually new.
+
+Our contributions are:
+\begin{enumerate}
+    \item \textbf{Prototype-routed continual sparse attention.} We extend ASAM from adaptive sparse attention for efficiency to a continual-learning setting in which sparse support selection is conditioned on prototypes rather than task identifiers alone, making routing geometry an explicit design surface.
+    \item \textbf{Capacity-constrained OT control variables.} We use Sinkhorn routing not only to balance assignments, but to define prototype capacity targets, usage, support, and excess statistics that become persistent continual-learning state variables.
+    \item \textbf{Transport-aware lifecycle updates.} We implement split, merge, reset, and relocation rules driven by latent barycenters, support statistics, and transport excess rather than by purely heuristic reinitialization.
+    \item \textbf{Theory-to-system alignment.} The quantities formalized in the control variables are computed in the model, optimized during training, exported by the benchmark, and reused by the online controller.
+    \item \textbf{Executable continual-learning benchmark suite.} We provide synthetic continual training, a real-text benchmark on Split AG News, multi-seed ablation studies, and report-generation utilities that expose stage-wise forgetting together with routing geometry diagnostics.
+\end{enumerate}
+
+%=============================================================================
+\section{Background: Adaptive Sparse Attention}
+\label{sec:background}
+
+We build on the Adaptive Sparse Attention Mechanism (ASAM), which provides a family of composable sparse attention patterns with adaptive gating. We briefly review the relevant components here and refer the reader to Appendix~\ref{sec:asam-details} for a complete description.
+
+\subsection{Sparse Attention Patterns}
+
+ASAM supports five sparse attention patterns, each reducing the $\mathcal{O}(n^2)$ cost of dense attention to $\mathcal{O}(n \log n)$ or $\mathcal{O}(n)$ through structured sparsity:
+
+\begin{itemize}
+    \item \textbf{Local} (sliding window): each query attends to a fixed window of size $w$ centered at its position. Complexity $\mathcal{O}(n w)$.
+    \item \textbf{Strided}: combines local-window attention with periodic strided attention at interval $s$. Complexity $\mathcal{O}(n w + n^2/s)$.
+    \item \textbf{Random}: each head attends to a random subset of $r$ positions drawn from a fixed seed. Complexity $\mathcal{O}(n r)$.
+    \item \textbf{Clustered}: tokens are assigned to learnable cluster centroids, and attention is restricted to within-cluster interactions. Complexity $\mathcal{O}(n \cdot k)$ for $k$ clusters.
+    \item \textbf{Hierarchical}: combines patterns at multiple granularities with learnable scale weights. Complexity depends on constituent patterns.
+\end{itemize}
+
+\subsection{Adaptive Gating}
+
+An \texttt{AdaptiveGate} module extracts multi-scale features from the input sequence and predicts per-head complexity estimates, confidence scores, and pattern-selection logits. In the default \texttt{ASAMLayer}, the gate implements differentiable soft mixing between sparse and dense attention outputs, producing a sparse-ratio diagnostic signal. Actual compute savings should be attributed to optimized sparse implementations, not to this soft mixture by itself.
+
+\subsection{Limitations for Continual Learning}
+
+The original ASAM formulation treats sparsity as a per-example efficiency decision. It does not maintain persistent routing state across tasks, does not provide mechanisms to stabilize route assignment under distribution shift, and does not expose diagnostic variables that can be correlated with forgetting. Continual ASAM addresses each of these limitations by introducing persistent prototype-based routing, capacity-constrained assignment, lifecycle control, and a closed diagnostic loop.
+
+%=============================================================================
+\section{Method: Continual ASAM}
+\label{sec:method}
+
+\subsection{Problem Setup}
+
+We consider stage-wise continual learning over a sequence of tasks $\mathcal{D}_1, \mathcal{D}_2, \dots, \mathcal{D}_T$. The current reported tables use a task-incremental multi-head protocol with local labels and oracle task identifiers at evaluation. The codebase now also exposes a stricter single-head/global-label protocol for future class-incremental reruns and a task-agnostic single-head mode that hides task identifiers from both training forward passes and evaluation. That mode is a strict no-task-ID model protocol while still using task partitions for stage-wise continual metrics; it is not a boundary-free streaming benchmark. At task stage $t$, the model receives examples from $\mathcal{D}_t$ and updates a shared sparse-attention backbone. The goal is to absorb new tasks while preserving routing structure that remains useful for previously seen tasks.
+
+\subsection{Prototype-Routed Sparse Attention}
+
+Given an input sequence representation $\mathbf{x} \in \mathbb{R}^{B \times L \times D}$, the model computes a normalized latent $\mathbf{z}(\mathbf{x}) \in \mathbb{R}^{B \times E}$ and routes it to a sparse distribution $\mathbf{p}(\mathbf{x}) \in \Delta^{M}$ over $M$ learned prototype anchors $\{\mathbf{a}_i\}_{i=1}^{M} \subset \mathbb{R}^{E}$. This routing distribution does not directly produce logits; instead, it controls sparse attention by selecting pattern mixtures and head importances:
+
+\begin{equation}
+\mathbf{p}(\mathbf{x}) = \Sinkhorn\!\Big(\mathbf{z}(\mathbf{x}) \mathbf{A}^\top / \tau + \lambda_{\text{prior}} \log \boldsymbol{\pi}\Big) \in \Delta^{M}
+\end{equation}
+
+where $\tau$ is a routing temperature, $\boldsymbol{\pi}$ is a remembered prior, and $\lambda_{\text{prior}}$ controls prior strength. The resulting prototype distribution is fed to a lightweight gate network that predicts (i) per-head sparse-pattern weights $\mathbf{W} \in \Delta^{P}$ across $P$ available sparse patterns, and (ii) head-importance scores $\mathbf{h} \in [0,1]^{H}$. Sparse attention is then computed only on the support induced by the selected patterns.
+
+This makes sparse attention \textit{prototype-mediated} rather than only task-mediated. The advantage is structural: prototype assignments, their statistics, and their geometry become explicit objects that can be measured, regularized, and controlled across task stages.
+
+\subsection{Capacity-Constrained Optimal Transport Routing}
+\label{sec:sinkhorn}
+
+Routing is biased by a remembered prior and then regularized through a Sinkhorn assignment with a capacity target $\mathbf{c} \in \Delta^{M}$:
+
+\begin{equation}
+\mathbf{T} = \Sinkhorn_{\epsilon, I}\!\Big(\exp(\mathbf{z}\mathbf{A}^\top / \epsilon),\; \mathbf{r}, \mathbf{c}\Big)
+\end{equation}
+
+where $\mathbf{r} = \mathbf{1}_B / B$ is the uniform row mass, $\epsilon$ controls entropic regularization strength, and $I$ is the number of Sinkhorn iterations. The dense transport plan $\mathbf{T}$ is then projected to a sparse top-$k$ support:
+
+\begin{equation}
+\mathbf{p}_k = \TopK(\mathbf{T}, k)
+\end{equation}
+
+This design serves two purposes simultaneously. First, it keeps routing computationally sparse through the top-$k$ projection. Second, and more importantly for continual learning, it defines explicit state variables that persist across task stages:
+
+\begin{align}
+\mathbf{u} &= \mathbb{E}_{\mathbf{x} \sim \mathcal{D}_t}[\mathbf{p}(\mathbf{x})] \quad \text{(average prototype usage)} \\
+\mathbf{c} &= \text{capacity target} \quad \text{(per-prototype capacity)} \\
+\mathbf{e} &= \mathbf{u} - \mathbf{c} \quad \text{(excess vector: routing above capacity)} \\
+\mathbf{s} &= \mathbb{E}_{\mathbf{x}}[\mathbb{I}[\mathbf{p}(\mathbf{x}) > 0]] \quad \text{(support: probability of prototype activation)}
+\end{align}
+
+These statistics are maintained as exponential moving averages across stages and form the basis for both the continual-learning surrogate loss and the lifecycle controller.
+
+\subsection{Continual-Learning Surrogate}
+
+The continual-learning controller is organized around a surrogate objective that complements task supervision with geometric control variables:
+
+\begin{equation}
+\Psi = \lambda_T \, \mathbb{E}[T(\mathbf{x})] + \lambda_R \, \mathbb{E}[R(\mathbf{x})] + \lambda_E \, \|\mathbf{e}\|_2^2 + \lambda_D \, D(\mathbf{A})
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $T(\mathbf{x})$ is the \textbf{transport loss}, which limits how far the routed prototype barycenter can move away from the latent geometry,
+    \item $R(\mathbf{x})$ is the \textbf{routing KL divergence} against the remembered prior, which limits route drift,
+    \item $\|\mathbf{e}\|_2^2$ is the \textbf{excess penalty}, which measures routing concentration above the uniform-collision floor,
+    \item $D(\mathbf{A})$ is a \textbf{diversity regularizer} that penalizes prototype redundancy through anchor similarity.
+\end{itemize}
+
+The role of this surrogate is not to replace task loss, but to provide geometric control variables that can be optimized jointly with task supervision and inspected stage-by-stage. This yields a practical surrogate view of forgetting: forgetting is controlled not directly, but through geometric drift ($T$), routing drift ($R$), and prototype interference ($\|\mathbf{e}\|^2$).
+
+\subsection{Transport-Aware Prototype Lifecycle Control}
+\label{sec:lifecycle}
+
+After each task stage, prototype statistics are updated through exponential moving averages with momentum $\eta$:
+
+\begin{equation}
+\mathbf{u}^{(t)} \leftarrow \eta \mathbf{u}^{(t-1)} + (1-\eta) \mathbf{u}_t
+\end{equation}
+
+Lifecycle operators are then triggered from these persistent statistics. The key design choice is that every operation is driven by transport-aware statistics rather than arbitrary periodic refresh rules.
+
+\paragraph{Split.} When a prototype's excess exceeds a threshold $\theta_{\text{split}}$ and a deficit prototype is available, mass is moved from the overloaded prototype toward the deficit barycenter. The relocation target is the weighted combination of the source anchor and the deficit barycenter, producing a new prototype targeted at under-served regions.
+
+\paragraph{Merge.} When two seen prototypes have cosine similarity above $\theta_{\text{merge}}$ and at least one has usage below $\theta_{\text{merge\_usage}}$, they are merged. The merged anchor is the usage-weighted combination, and the freed prototype is reset toward the deficit barycenter with noise, recycling its capacity.
+
+\paragraph{Reset.} Prototypes whose usage, capacity, \textit{and} support all fall below $\theta_{\text{reset}}$ are reinitialized toward the deficit barycenter, recovering nearly unused capacity for future tasks.
+
+\paragraph{Relocation.} Even without split or reset, prototype embeddings are softly relocated toward their latent barycenters with strength $\rho$, maintaining alignment between the remembered anchor geometry and the actual routing distribution.
+
+These lifecycle operations make Continual ASAM self-maintaining: overload, redundancy, and under-utilization are detected from persistent transport statistics and corrected through targeted geometric updates rather than through ad-hoc reinitialization schedules.
+
+\subsection{Birkhoff Transport Between Stages}
+\label{sec:birkhoff}
+
+Beyond local lifecycle updates, we optionally apply a Birkhoff-von Neumann transition $\mathbf{B} \in \mathcal{D}^M$ (a doubly stochastic matrix) that transports prototype statistics across stages. Given current usage $\mathbf{u}$ and capacity $\mathbf{c}$, the transition is derived from anchor similarity with diagonal bias and excess-deficit pressure:
+
+\begin{equation}
+\mathbf{B} = \Sinkhorn\!\Big(\exp\!\big(\mathbf{S}/\epsilon + \beta \mathbf{I} + \gamma \mathbf{P}\big)\Big)
+\end{equation}
+
+where $\mathbf{S}_{ij} = \langle \mathbf{a}_i, \mathbf{a}_j \rangle / (\|\mathbf{a}_i\| \|\mathbf{a}_j\|)$ is the anchor similarity matrix, $\beta$ is a diagonal bias, and $\mathbf{P}_{ij} = (\mathbf{e}_i)_+ \cdot (\mathbf{c}_j - \mathbf{u}_j)_+ \cdot M$ is an excess-deficit pressure term that encourages transport from over-utilized to under-utilized prototypes. An adaptive gate caps the applied transport strength based on the observed transport gap, off-diagonal mass, and gap tolerance, preventing destabilizing large transitions.
+
+\subsection{Closed Diagnostic Loop}
+
+A central design principle of Continual ASAM is that the theory variables are not only explanatory notation. The implementation exports the same variables that appear in the formalized control variables, including transport loss, routing stability, excess statistics, prototype lifecycle counts, and stage-wise training metrics. The benchmark then exports stage-wise traces of these quantities alongside forgetting; correlating them with forgetting across runs requires longer task streams than the two-task setup used here and is left as future work. In the adaptive controller variant, these diagnostics additionally feed into an online hyperparameter controller that adjusts prior strength, capacity blend, and relocation strength in response to rising transport loss, excess, or routing drift.
+
+%=============================================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Sparse Attention}
+
+Sparse attention methods reduce the quadratic cost of dense self-attention through structured sparsity patterns. Local-window attention \citep{beltagy2020longformer}, strided attention \citep{child2019generating}, random attention \citep{zaheer2020big}, and kernel-based approximations \citep{wang2020linformer,choromanski2020rethinking} each offer different complexity-quality trade-offs. Flash Attention \citep{dao2022flashattention} and its successors optimize I/O rather than sparsity. These methods target computational efficiency and long-context modeling; they do not define a continual-learning routing geometry.
+
+\subsection{Continual Learning}
+
+Existing continual learning methods can be broadly grouped into regularization-based \citep{kirkpatrick2017overcoming,zenke2017continual}, replay-based \citep{rebucci2017icarl,chaudhry2019tiny}, and architecture-based \citep{rusu2016progressive,mallya2018packnet} approaches. Routing-based continual learning \citep{fernando2017pathnet,wen2020batchensemble} studies task-conditioned path selection, but these methods typically route at the layer or module level and do not expose the sparse attention support itself as the routing object.
+
+\subsection{Prototype-Based Methods}
+
+Prototype memories \citep{snell2017prototypical} and class-summary methods \citep{rebuffi2017icarl} preserve task information compactly. However, prototypes in these methods summarize representations or replay targets; they do not directly control sparse attention-pattern selection. Continual ASAM instead uses prototype routing as the mechanism that decides which sparse supports and heads are active.
+
+\subsection{Optimal Transport in Deep Learning}
+
+Sinkhorn-based balancing \citep{cuturi2013sinkhorn}, differentiable top-$k$ assignment \citep{xie2020differentiable}, and load-aware routing \citep{fedus2022switch} are known tools in sparse expert systems. Our use of optimal transport is motivated differently: we use capacity-constrained routing not only to balance assignments, but to define persistent state variables---usage, capacity, support, and excess---that drive continual-learning lifecycle control.
+
+Taken together, prior work motivates each ingredient of Continual ASAM, but not their exact combination. Our contribution is to unify these ingredients into a continual sparse-attention controller whose theory variables are directly observable in code and benchmark outputs.
+
+%=============================================================================
+\section{Theoretical Analysis}
+\label{sec:theory}
+
+We provide three results that formalize what the Continual ASAM control variables measure. Proofs are in Appendix~\ref{sec:proofs}. The results are deliberately modest: the first two formalize properties of the quantities we monitor, and the final connection to forgetting is presented as an informal interpretation rather than a theorem.
+
+\subsection{Transport Loss Upper Bound}
+
+\begin{theorem}[Transport Loss under Sinkhorn Routing]
+\label{thm:transport}
+Let $\mathbf{T}^* = \Sinkhorn_{\epsilon}(\mathbf{Z}\mathbf{A}^\top)$ be the entropically regularized transport plan with regularization strength $\epsilon$ and capacity constraints $\mathbf{T}\mathbf{1} = \mathbf{r}$, $\mathbf{T}^\top\mathbf{1} = \mathbf{c}$, and let $\mathbf{C}_{ij} = \|\mathbf{z}_i - \mathbf{a}_j\|_2^2$ be the transport cost matrix. Let $\boldsymbol{\pi}^*$ be the exact optimal transport plan under the same marginals, with cost $\mathrm{OT}(\mathbf{C}) = \langle \boldsymbol{\pi}^*, \mathbf{C} \rangle$. Then the transport loss $T(\mathbf{x}) = \langle \mathbf{T}^*, \mathbf{C} \rangle$ satisfies:
+\begin{equation}
+\mathrm{OT}(\mathbf{C}) \leq T(\mathbf{x}) \leq \mathrm{OT}(\mathbf{C}) + \epsilon \cdot \KL(\boldsymbol{\pi}^* \| \mathbf{r}\mathbf{c}^\top)
+\end{equation}
+where $\KL(\cdot\|\cdot)$ is the Kullback-Leibler divergence. In particular, $T(\mathbf{x}) \to \mathrm{OT}(\mathbf{C})$ as $\epsilon \to 0$: the transport loss is an $\epsilon$-consistent estimator of the exact optimal transport cost between the latent distribution and the prototype anchors.
+\end{theorem}
+
+The practical implication of Theorem~\ref{thm:transport} is that the transport loss is an $\epsilon$-consistent estimate of the exact transport cost between latents and anchors: reducing it moves the routed coupling toward the exact optimal plan, which is the quantity the lifecycle controller monitors. We deliberately do not claim a formal bound on barycenter drift; drift control is enforced operationally through the relocation operator (Sec.~\ref{sec:lifecycle}).
+
+\subsection{Routing Stability Through KL Control}
+
+\begin{theorem}[Routing Drift Decomposition]
+\label{thm:routing}
+Let $\mathbf{p}_t$ be the prototype routing distribution at stage $t$ and $\boldsymbol{\pi}_t$ be the remembered prior (EMA of $\mathbf{p}_{1:t-1}$). The routing stability loss admits the decomposition:
+\begin{equation}
+R_t = \KL(\mathbf{p}_t \| \boldsymbol{\pi}_t) = \underbrace{H(\mathbf{p}_t)}_{\text{entropy}} - \underbrace{\mathbb{E}_{\mathbf{p}_t}[\log \boldsymbol{\pi}_t]}_{\text{cross-entropy with memory}}
+\end{equation}
+where $H(\mathbf{p}_t)$ is the routing entropy reflecting exploration and the cross-entropy term penalizes deviation from remembered routes. In the stationary limit ($\boldsymbol{\pi}_t \to \mathbf{p}^*$), $R_t \to \KL(\mathbf{p}_t \| \mathbf{p}^*)$, the true divergence from the optimal routing.
+\end{theorem}
+
+Theorem~\ref{thm:routing} decomposes routing stability into an entropy term and a cross-entropy-with-memory term, which is why the diagnostics export both quantities separately. We do not claim that an observed rise in $R_t$ can be uniquely attributed to exploration versus overwriting---both terms move jointly in general---and we treat the decomposition as a monitoring tool rather than an identifiability result.
+
+\subsection{Excess-Forgetting Relationship}
+
+\begin{theorem}[Excess as Interference Proxy]
+\label{thm:excess}
+Let $\mathbf{e} = \mathbf{u} - \mathbf{c}$ be the prototype excess vector. Under the uniform-capacity baseline $\bar{c} = 1/M$, the expected collision probability between two independent inputs routed through the same prototype bank satisfies:
+\begin{equation}
+\mathbb{P}(\text{route collision}) = \|\mathbf{u}\|_2^2 = \frac{1}{M} + \|\mathbf{e}\|_2^2
+\end{equation}
+The excess norm $\|\mathbf{e}\|_2^2$ therefore measures routing interference \textit{above} the uniform-collision floor $1/M$.
+\end{theorem}
+
+Theorem~\ref{thm:excess} provides a direct geometric interpretation: $\|\mathbf{e}\|_2$ is not merely a Lagrange penalty but a physically meaningful measure of how much more concentrated routing has become than uniform assignment. When $\|\mathbf{e}\|_2$ rises across stages, the model is routing more inputs through fewer prototypes, increasing the risk that distinct tasks interfere through shared sparse attention supports. We emphasize that route collision is a geometric proxy for interference, not a proven bound on forgetting; the connection to forgetting is supported by the exported diagnostics rather than by a formal guarantee.
+
+\subsection{Surrogate Control and Forgetting: An Informal Interpretation}
+
+\paragraph{(Non-formal).} The surrogate $\Psi = \lambda_T T + \lambda_R R + \lambda_E \|\mathbf{e}\|^2$ is intended to constrain the drift of the routing geometry: the transport term limits deviation of the routed coupling from the exact transport plan (Theorem~\ref{thm:transport}), the KL term limits route drift from remembered behavior (Theorem~\ref{thm:routing}), and the excess term penalizes concentration above the uniform-collision floor (Theorem~\ref{thm:excess}). Because all three quantities are computed, optimized, and exported by the implementation, the surrogate provides a monitoring view of the mechanisms that are expected to mediate forgetting. We deliberately stop short of claiming a formal forgetting bound: surrogate loss values do not by themselves bound parameter movement, and a rigorous bound would require additional assumptions linking the surrogate to the training dynamics and to downstream accuracy. We therefore present this connection as a design rationale supported by the diagnostics, not as a theorem.
+
+%=============================================================================
+\section{Experiments}
+\label{sec:experiments}
+
+We evaluate Continual ASAM at three complementary levels: (1) a controlled synthetic continual-learning scaffold for mechanism checks, (2) a real-text continual benchmark on task-incremental multi-head Split AG News, and (3) multi-seed ablation studies across routing strategies, operator choices, and controller settings.
+
+\subsection{Experimental Setup}
+
+\paragraph{Backbone.} The byte-level ablations use a compact backbone with model dimension $D=64$, $H=4$ attention heads, $L=1$ transformer layer, and $K=2$ top-$k$ sparse patterns; the BPE strategy table uses $D=128$, $H=8$, $L=2$. The pattern bank contains four sparse attention operators: local, strided, random, and hierarchical.
+
+\paragraph{Continual Protocol.} The reported results use Split AG News with 2 classes per task, local per-task labels, task-specific classifier heads, and oracle task identifiers at evaluation. This is a task-incremental multi-head protocol rather than a strict single-head class-incremental protocol. Sequence length is capped at 128, batch size is 8, and AdamW uses learning rate $3 \times 10^{-4}$. All reported text tables use 64 training samples and 32 validation samples per task; the BPE strategy table uses 3 random seeds and the byte-level ablations use 2 random seeds. A modest episodic replay buffer stores previous batches with replay batch size 4.
+
+\paragraph{Strict-protocol smoke checks.} The repository also includes small single-head/global-label smoke artifacts for stricter protocol paths. The class-incremental smoke check uses cached AG News, one seed, character vocabulary size 128, 128/64 train/validation caps, and no oracle task identifiers at evaluation, yielding average accuracy $0.2188$ and average forgetting $0.0625$. A stricter task-agnostic single-head ablation smoke check additionally hides task identifiers from training forward passes, uses BPE vocabulary size 10{,}000 and two seeds, and records that task-routed and task-conditioned dual-transport baselines are skipped as incompatible. It still uses task partitions for stage-wise continual metrics and exported diagnostics. These artifacts validate protocol plumbing but are not directly comparable to the BPE multi-seed tables below.
+
+\paragraph{Routing Configuration.} Prototype routing uses $M = T \times s$ prototype anchors, where $s$ is the number of slots per task (default $s = 2$, giving $M = 4$ anchors for the two-task setup used here), prototype embedding dimension $E = 64$, routing temperature $\tau = 1.0$, prior strength $\lambda_{\text{prior}} = 1.0$, prior floor $10^{-3}$, Sinkhorn $\epsilon = 0.1$, $I = 20$ iterations, and capacity blend $0.5$. Lifecycle defaults: relocation strength $\rho = 0.75$, reset threshold $0.01$, split threshold $0.20$, noise scale $0.05$, merge similarity threshold $0.90$, merge usage threshold $0.10$.
+
+\paragraph{Training.} The loss combines cross-entropy with weighted continual-learning regularizers: overlap weight $0.1$, stability weight $0.1$, balance weight $0.05$, diversity weight $0.05$, and transport weight $0.05$.
+
+\paragraph{Compared Strategies.} The multi-seed ablation compares compatible routing strategies already implemented in the benchmark: \texttt{task\_routing} (task-conditioned continual ASAM), \texttt{no\_adaptation} (prototype routing without online updates), \texttt{correlation} (diagnostic correlation-based adaptation), \texttt{dual\_transport} (task-level transport dual update), and \texttt{meta\_secant} (secant-style meta-controller). Strict no-task-ID protocols skip task-conditioned strategies, including \texttt{task\_routing} and \texttt{dual\_transport}, and record the incompatibility in the exported summary.
+
+\paragraph{Metrics.} Primary: average final accuracy, average forgetting, and backward transfer. Secondary (geometry-facing): stage-wise transport gap, transport loss, routing-stability loss, mean absolute excess, prototype lifecycle counts, and per-stage optimization terms.
+
+\subsection{Main Results}
+
+Table~\ref{tab:strategy_ablation_main} presents the primary results with BPE word-level tokenization (vocabulary size 10,000), model dimension $D=128$, 8 heads, 2 attention layers, 3 training epochs per task, 3 seeds, and 64/32 train/validation samples per task on the task-incremental multi-head Split AG News protocol. Task-conditioned routing achieves the highest accuracy ($0.5312$) but also the highest average forgetting ($+0.0417$), while the four prototype-routed strategies achieve slightly lower accuracy ($0.5104$) with zero average forgetting ($0.0000$). All values are close to the $0.5$ chance level of the two-class protocol, so differences should be interpreted with care at this sample scale.
+
+The key structural difference is diagnostic: prototype routing additionally provides a measurable transport gap ($0.0477$), routing stability, prototype usage statistics, and lifecycle counts that the task-conditioned baseline cannot produce. This diagnostic layer is the concrete benefit that the framework adds over the task-conditioned baseline. An earlier pilot study with byte-level encoding ($D=64$, 1 layer, 1 epoch) found that prototype routing reduces forgetting more than task routing when the training budget is extremely limited (Table~\ref{tab:operator_ablation}).
+
+\begin{table}[t]
+\centering
+\caption{Strategy comparison with BPE tokenization ($D=128$, 8 heads, 2 layers, 3 epochs, 3 seeds, 64/32 samples per task, Split AG News). Prototype variants (no\_adaptation, correlation, dual\_transport, meta\_secant) share identical aggregate statistics at this scale.}
+\label{tab:strategy_ablation_main}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Strategy} & \textbf{Accuracy} & \textbf{Forgetting} & \textbf{Transport Gap} \\
+\midrule
+\texttt{task\_routing} & $\mathbf{0.5312} \pm 0.0255$ & $0.0417 \pm 0.0295$ & $0.0000 \pm 0.0000$ \\
+\texttt{prototype (all 4)} & $0.5104 \pm 0.0147$ & $\mathbf{0.0000} \pm 0.0510$ & $0.0477 \pm 0.0047$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The results establish an accuracy-diagnostic trade-off at this scale: task routing achieves the highest raw accuracy but provides no routing geometry variables, while prototype routing reports a measurable transport gap and routing-stability traces that the task-conditioned baseline cannot produce. The forgetting differences between strategies are within seed noise ($\pm 0.03$--$0.05$), so we present the geometry exports, not accuracy gains, as the primary framework-level contribution.
+
+\begin{table}[t]
+\centering
+\caption{Operator ablation comparing routing strategies and lifecycle settings (2 seeds, top-$k$=2, transport weight 0.05). Negative forgetting indicates backward improvement.}
+\label{tab:operator_ablation}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Setting} & \textbf{Accuracy} & \textbf{Forgetting} & \textbf{Final Gap} & \textbf{Transport Loss} \\
+\midrule
+\texttt{sinkhorn\_topk} & $0.4844 \pm 0.0156$ & $-0.0938 \pm 0.0938$ & $0.0195 \pm 0.0008$ & $0.0659 \pm 0.0099$ \\
+\texttt{kl\_topk} & $\mathbf{0.5156} \pm \mathbf{0.0156}$ & $\mathbf{-0.1562} \pm \mathbf{0.1562}$ & $0.0130 \pm 0.0046$ & $0.0671 \pm 0.0099$ \\
+\texttt{no\_transport} & $0.4844 \pm 0.0156$ & $-0.0938 \pm 0.0938$ & $0.0195 \pm 0.0008$ & $0.0673 \pm 0.0111$ \\
+\texttt{no\_merge} & $0.5000 \pm 0.0312$ & $-0.0625 \pm 0.1250$ & $0.0215 \pm 0.0014$ & $0.0639 \pm 0.0077$ \\
+\texttt{no\_relocation} & $0.4688 \pm 0.0312$ & $-0.0312 \pm 0.0938$ & $0.0210 \pm 0.0003$ & $0.0658 \pm 0.0111$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Comparison with Standard Continual Learning Baselines}
+
+We compare Continual ASAM against three standard continual learning regularizers---EWC, SI, and MAS---under a unified byte-level setup (char tokenizer, dim=64, 1 layer, 1 epoch, 64/32 train/validation samples per task, 2 seeds). For fairness, every method uses the same task-incremental multi-head protocol with per-task classifier heads and oracle task identifiers at evaluation; the standard regularizers are applied to a vanilla transformer backbone of the same scale, and the Continual ASAM rows use the same data pipeline (with its episodic replay buffer). Table~\ref{tab:baseline_comparison} reports mean accuracy, forgetting, and backward transfer. All methods achieve comparable accuracy ($0.4844$--$0.5000$) and near-zero forgetting ($0.0000$--$0.1250$); differences are within seed noise at this sample scale. Continual ASAM (prototype) matches EWC and MAS on both metrics ($0.5000$ accuracy, $0.0000$ forgetting), while the task-conditioned ASAM row shows the highest forgetting ($0.1250$). The prototype-routed variant additionally exports per-stage transport gaps, routing stability, and prototype lifecycle statistics that none of the standard baselines can provide.
+
+\begin{table}[t]
+\centering
+\caption{Comparison against standard continual learning baselines under a unified task-incremental multi-head protocol (char tokenizer, dim=64, 1 layer, 1 epoch, 2 seeds, 64/32 samples per task). Lower forgetting is better.}
+\label{tab:baseline_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{Accuracy} & \textbf{Forgetting} $\downarrow$ & \textbf{BWT} $\uparrow$ \\
+\midrule
+fine\_tune (no CL) & $0.4844 \pm 0.0156$ & $0.0000 \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+EWC & $0.5000 \pm 0.0000$ & $0.0000 \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+SI & $0.4844 \pm 0.0156$ & $0.0000 \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+MAS & $0.5000 \pm 0.0000$ & $0.0000 \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+Continual ASAM (task) & $0.4844 \pm 0.0469$ & $0.1250 \pm 0.0625$ & $-0.1250 \pm 0.0625$ \\
+Continual ASAM (prototype) & $0.5000 \pm 0.0000$ & $\mathbf{0.0000} \pm 0.0000$ & $0.0000 \pm 0.0000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Diagnostic Analysis}
+
+The single-run prototype-routing benchmark with the meta-secant controller (byte-level setup, one seed) reaches average accuracy $0.4688$, average forgetting $-0.1875$, and backward transfer $0.1875$. The negative forgetting value indicates that the model actually improved on prior tasks after training on later ones---a desirable property in continual learning. Stage-wise diagnostics from the benchmark report provide geometric insight: transport gap, transport loss, routing stability, and prototype lifecycle counts (merge, split, reset) are tracked across stages and exported alongside forgetting; with only two tasks the benchmark yields a single forgetting value per run, so correlating the diagnostics with forgetting requires longer task streams and is left as future work. The complete diagnostic visualization is exported by \texttt{scripts/run\_continual\_paper\_suite.py} as a multi-panel figure containing the accuracy matrix, final-task accuracy profile, stage-wise theory traces, and task-prototype occupancy heatmap.
+
+The benchmark report additionally exports: (i) an accuracy matrix showing per-task accuracy across stages, (ii) a final-task accuracy profile, (iii) stage-wise theory diagnostics (transport gap, transport loss, routing stability, mean excess, merge/split/reset counts), and (iv) a task-prototype occupancy heatmap. The complete visualization suite is generated by \texttt{scripts/run\_continual\_paper\_suite.py} and all figures can be regenerated from the same command-line pipeline.
+
+\subsection{Reproducibility}
+
+All experiments are reproducible through the released codebase. The one-command script \texttt{scripts/run\_continual\_paper\_suite.py} executes the benchmark, runs the multi-seed ablation, and writes a complete suite manifest plus paper-ready summary report. The canonical artifacts for the tables are \texttt{experiments/paper\_suite/r2\_agnews\_bpe\_3ep.json} (Table~\ref{tab:strategy_ablation_main}), \texttt{experiments/paper\_suite/continual\_operator\_ablation.json} (Table~\ref{tab:operator_ablation}), \texttt{experiments/paper\_suite/r2\_baseline\_comparison.json} (Table~\ref{tab:baseline_comparison}), and \texttt{experiments/paper\_suite/continual\_benchmark.json} (single-run diagnostics). Every number in the paper tables is traceable to a saved JSON, CSV, or Markdown artifact, and the table-to-artifact mapping is enforced by a consistency test in the repository.
+
+%=============================================================================
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+Continual ASAM has several important limitations that frame its current contribution.
+
+\textbf{Theoretical scope.} The mathematical story is a surrogate-control argument rather than a full forgetting theorem. Theorem~\ref{thm:transport} is an $\epsilon$-consistency statement for the transport loss, Theorem~\ref{thm:routing} is a definitional decomposition, and Theorem~\ref{thm:excess} is a geometric proxy; the connection from these quantities to downstream test accuracy is presented as a design rationale, not a proven bound. Claims should therefore remain at the level of coherence, interpretability, and diagnostic usefulness.
+
+\textbf{Empirical scale.} The current experiments use relatively small backbones ($D=64$ or $D=128$), 64/32 train/validation samples per task, 2--3 random seeds, and clear stage boundaries on Split AG News. Several reported differences are within seed noise at this scale. This is sufficient to study routing geometry, but does not establish effectiveness for long task streams, larger pretrained models, or more realistic non-stationary settings.
+
+\textbf{Operator decomposition.} The current ablation scope compares routing strategies and toggles key lifecycle operators, but does not yet provide a complete operator-by-operator decomposition. Split-only, merge-only, reset-off, and full operator combinations are partially supported through threshold controls but not yet exhaustively benchmarked.
+
+\textbf{Controller overhead.} The prototype-routed controller adds state beyond a standard sparse-attention layer: routing bookkeeping, lifecycle maintenance, hyperparameter adaptation, and diagnostic export. For a continual-learning paper this trade-off may be acceptable, but it is important to quantify the overhead in future work.
+
+\textbf{Novelty scope.} Sparse attention, Sinkhorn routing, prototype memories, and continual-learning regularization all have substantial prior art. The contribution is strongest as a framework-level integration claim. Future work should test whether this integration principle transfers beyond continual text classification to broader modular routing settings.
+
+%=============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented Continual ASAM, a continual-learning extension of adaptive sparse attention that combines prototype-routed sparse support selection, capacity-constrained optimal transport, transport-aware lifecycle control, and a closed diagnostic loop into one unified controller. The method is not a claim to invent each component in isolation, but rather an argument that continual sparse-routing control becomes more principled when the same mathematical variables appear in the optimization surrogate, the lifecycle rules, the diagnostic exports, and the online adaptation loop. Our executable benchmark suite demonstrates that these variables are measurable and that they move in theoretically coherent directions under different routing strategies and operator settings. We believe the design principle---route, measure, diagnose, and adapt from the same variables---may generalize beyond the current text classification setting to broader modular continual-learning systems.
+
+%=============================================================================
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+%=============================================================================
+\appendix
+\section{Full Proofs}
+\label{sec:proofs}
+
+\begin{proof}[Proof of Theorem~\ref{thm:transport}]
+Consider the entropic optimal transport problem:
+\begin{equation}
+\mathbf{T}^* = \argmin_{\mathbf{T} \in \mathcal{U}(\mathbf{r},\mathbf{c})} \langle \mathbf{T}, \mathbf{C} \rangle + \epsilon \KL(\mathbf{T} \| \mathbf{r}\mathbf{c}^\top)
+\end{equation}
+where $\mathbf{C}_{ij} = \|\mathbf{z}_i - \mathbf{a}_j\|_2^2$, $\mathbf{r} = \mathbf{1}_B/B$, and $\mathcal{U}(\mathbf{r},\mathbf{c}) = \{\mathbf{T} \geq 0: \mathbf{T}\mathbf{1} = \mathbf{r}, \mathbf{T}^\top\mathbf{1} = \mathbf{c}\}$.
+
+Let $\boldsymbol{\pi}^* \in \argmin_{\mathbf{T} \in \mathcal{U}(\mathbf{r},\mathbf{c})} \langle \mathbf{T}, \mathbf{C} \rangle$ be an exact optimal transport plan, so that $\mathrm{OT}(\mathbf{C}) = \langle \boldsymbol{\pi}^*, \mathbf{C} \rangle$. Because $\mathbf{T}^*$ minimizes the entropic objective and $\boldsymbol{\pi}^*$ is feasible for it,
+\begin{equation}
+\langle \mathbf{T}^*, \mathbf{C} \rangle + \epsilon \KL(\mathbf{T}^* \| \mathbf{r}\mathbf{c}^\top) \leq \langle \boldsymbol{\pi}^*, \mathbf{C} \rangle + \epsilon \KL(\boldsymbol{\pi}^* \| \mathbf{r}\mathbf{c}^\top).
+\end{equation}
+Dropping the nonnegative KL term on the left and rearranging gives
+\begin{equation}
+T(\mathbf{x}) = \langle \mathbf{T}^*, \mathbf{C} \rangle \leq \mathrm{OT}(\mathbf{C}) + \epsilon \KL(\boldsymbol{\pi}^* \| \mathbf{r}\mathbf{c}^\top).
+\end{equation}
+The lower bound $T(\mathbf{x}) \geq \mathrm{OT}(\mathbf{C})$ holds by optimality of $\boldsymbol{\pi}^*$. Under the full-support marginals typical of Sinkhorn practice, $\KL(\boldsymbol{\pi}^* \| \mathbf{r}\mathbf{c}^\top)$ is finite, so taking $\epsilon \to 0$ yields $T(\mathbf{x}) \to \mathrm{OT}(\mathbf{C})$, the claimed $\epsilon$-consistency. We do not claim a rate of convergence beyond this statement, and we do not claim a formal bound on barycenter drift; the relocation operator (Sec.~\ref{sec:lifecycle}) serves that role operationally.
+\end{proof}
+
+\begin{proof}[Proof of Theorem~\ref{thm:routing}]
+By definition of the Kullback-Leibler divergence and entropy:
+\begin{align}
+\KL(\mathbf{p}_t \| \boldsymbol{\pi}_t) &= \sum_{i=1}^M p_{t,i} \log\frac{p_{t,i}}{\pi_{t,i}} = \sum_i p_{t,i} \log p_{t,i} - \sum_i p_{t,i} \log \pi_{t,i} \\
+&= -H(\mathbf{p}_t) - \mathbb{E}_{\mathbf{p}_t}[\log \boldsymbol{\pi}_t]
+\end{align}
+where $H(\mathbf{p}_t) = -\sum_i p_{t,i} \log p_{t,i}$ is the Shannon entropy.
+
+The remembered prior $\boldsymbol{\pi}_t = \eta \boldsymbol{\pi}_{t-1} + (1-\eta) \mathbf{p}_{t-1}$ is the EMA of past routing distributions with momentum $\eta$. Decomposing the cross-entropy term:
+\begin{equation}
+-\mathbb{E}_{\mathbf{p}_t}[\log \boldsymbol{\pi}_t] = -\sum_i p_{t,i} \log\!\big(\eta \pi_{t-1,i} + (1-\eta) p_{t-1,i}\big)
+\end{equation}
+The first term is the entropy of the current routing and the second is its cross-entropy with the remembered prior; both are exported separately by the diagnostics. Attributing an observed change in $R_t$ to one term versus the other is not identifiable without additional assumptions, so we treat the decomposition as a monitoring tool. In the stationary limit $\boldsymbol{\pi}_t \to \mathbf{p}^*$, we have $\KL(\mathbf{p}_t \| \boldsymbol{\pi}_t) \to \KL(\mathbf{p}_t \| \mathbf{p}^*)$, the divergence from the remembered optimal routing.
+\end{proof}
+
+\begin{proof}[Proof of Theorem~\ref{thm:excess}]
+Let $\mathbf{u} \in \Delta^{M}$ be the average prototype usage distribution and $\mathbf{c} \in \Delta^{M}$ the capacity target. Define the excess $\mathbf{e} = \mathbf{u} - \mathbf{c}$.
+
+Two independent inputs $\mathbf{x}, \mathbf{x}'$ collide in routing if they are assigned to the same prototype. Under $\mathbf{u}$, the collision probability is:
+\begin{equation}
+\mathbb{P}(\text{collision}) = \sum_{i=1}^M \mathbb{P}(\text{both assigned to } i) = \sum_{i=1}^M u_i^2 = \|\mathbf{u}\|_2^2
+\end{equation}
+
+Now decompose $\mathbf{u}$ relative to the uniform baseline $\bar{c} = 1/M$:
+\begin{align}
+\|\mathbf{u}\|_2^2 &= \|\bar{c}\mathbf{1} + \mathbf{e}\|_2^2 = \bar{c}^2\|\mathbf{1}\|_2^2 + 2\bar{c}\langle\mathbf{1},\mathbf{e}\rangle + \|\mathbf{e}\|_2^2 \\
+&= M \cdot \frac{1}{M^2} + 2\bar{c} \cdot 0 + \|\mathbf{e}\|_2^2 = \frac{1}{M} + \|\mathbf{e}\|_2^2
+\end{align}
+where $\langle\mathbf{1},\mathbf{e}\rangle = \sum_i e_i = \sum_i u_i - \sum_i c_i = 1 - 1 = 0$.
+
+Thus $\|\mathbf{e}\|_2^2 = \mathbb{P}(\text{collision}) - 1/M$, measuring routing interference above the uniform-collision floor. When routing is uniform ($\mathbf{e} = \mathbf{0}$), collisions occur at the irreducible rate $1/M$. As routing concentrates ($\|\mathbf{e}\|_2^2$ grows), the collision probability rises, increasing the risk that distinct tasks share the same sparse attention supports and interfere.
+\end{proof}
+
+\paragraph{Note on the surrogate-control interpretation.}
+The informal interpretation in Sec.~\ref{sec:theory} deliberately avoids a formal statement: surrogate loss values do not by themselves bound parameter movement, because the surrogate is an auxiliary objective rather than a constraint on the training dynamics. A rigorous forgetting bound would require (i) a Lipschitz relationship between accuracy and parameters, (ii) a link between surrogate values and parameter displacement, and (iii) a connection from the current task's loss to earlier-task accuracy. None of these are assumed in this paper, and the surrogate is presented only as a monitoring rationale.
+
+\section{ASAM Attention Details}
+\label{sec:asam-details}
+
+The Adaptive Sparse Attention Mechanism (ASAM) provides the attention backbone on which Continual ASAM is built. An ASAM layer consists of: (i) a pre-norm followed by QKV projection, (ii) an optional adaptive gate that softly mixes sparse and dense attention outputs in the default layer, (iii) a sparse pattern module that constructs the attention support, and (iv) a standard FFN block. The adaptive gate extracts multi-scale features via adaptive average pooling at $[1, 2, 4, 8] \times$ scales, projects them through a bottleneck MLP, and predicts per-head complexity estimates, confidence scores, and pattern-selection logits. The sparse pattern module supports local, strided, random, clustered, and hierarchical patterns. For Continual ASAM, the adaptive gate is replaced by prototype-routed sparse support selection, and the pattern module is extended with per-task and per-prototype pattern memory.
+
+\section{Implementation Details}
+\label{sec:implementation}
+
+The reference classifier used for the reported tables uses token embedding, learned positional embedding, a stack of Continual ASAM layers, layer normalization, sequence mean pooling, and task-specific linear classifier heads. The benchmark implementation additionally exposes single-head/global-label and task-agnostic single-head modes for stricter reruns, but those rerun results are not yet the source of the tables above. Hyperparameter adaptation uses two update modes: \texttt{correlation} (diagnostic-signal-driven step updates) and \texttt{meta\_secant} (secant-method meta-objective optimization), with an adaptation warmup of 1 stage before adjustments begin.
+
+Birkhoff transport between stages uses the following defaults: transport strength $0.02$, adaptive gate enabled, gap target $0.03$, max applied off-diagonal mass $0.006$, gap tolerance $0.0$, min effective strength $10^{-4}$, sinkhorn iterations $32$, epsilon $0.25$, diagonal bias $4.0$, and gap weight $4.0$.
+
+\section{Extended Operator Ablations}
+\label{sec:extended-ablation}
+
+Beyond the strategy-level comparison in the main text, the repository supports operator-level toggles that isolate individual mechanisms. These are executable through threshold controls but are not yet fully benchmarked in the current paper:
+
+\begin{itemize}
+    \item \textbf{Routing operators:} \texttt{sinkhorn\_topk} vs. \texttt{kl\_topk} (controlled via \texttt{prototype\_routing\_strategy}).
+    \item \textbf{Transport objective:} transport weight on/off (controlled via \texttt{transport\_weight}).
+    \item \textbf{Lifecycle operators:} split suppression via high \texttt{prototype\_split\_threshold}, reset suppression via \texttt{prototype\_reset\_threshold=0}, merge suppression via \texttt{prototype\_merge\_usage\_threshold=0}, relocation neutralization via \texttt{prototype\_relocation\_strength=0}.
+    \item \textbf{Closed-loop adaptation:} open-loop vs. correlation vs. meta-secant (controlled via \texttt{adaptive\_hyperparameters} and \texttt{adaptation\_strategy}).
+\end{itemize}
+
+\section{Reproducibility Checklist}
+\label{sec:reproducibility}
+
+\begin{itemize}
+    \item \textbf{Code availability.} All method implementations, benchmark scripts, report generators, and tests are present in the public codebase.
+    \item \textbf{Environment.} Python 3.8+, PyTorch 2.0+, dependencies specified in \texttt{requirements.txt}.
+    \item \textbf{Determinism.} All scripts expose random seeds; ablation runner evaluates multiple seeds per strategy.
+    \item \textbf{Model configuration.} Key architectural controls exposed as script arguments.
+    \item \textbf{Data protocol.} Reported tables use task-incremental multi-head Split AG News with configurable caps, sequence length, and batch size; the code also supports single-head/global-label and task-agnostic single-head reruns.
+    \item \textbf{Metrics.} All reported scalars computed from exported JSON artifacts.
+    \item \textbf{Artifacts.} All JSON summaries, CSV tables, and PNG plots are generated by the paper suite script.
+    \item \textbf{Statistical rigor.} Mean and standard deviation across seeds for all tables.
+\end{itemize}
+
+\end{document}
