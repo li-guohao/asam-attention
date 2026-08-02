@@ -1,0 +1,173 @@
+{
+  "config": {
+    "protocol": "task_incremental_multihead",
+    "dataset_name": "split_dbpedia",
+    "classes_per_task": 2,
+    "label_mode": "local",
+    "head_mode": "multi",
+    "train_task_id_mode": "oracle",
+    "eval_task_id_mode": "oracle",
+    "max_length": 128,
+    "batch_size": 8,
+    "max_train_samples": 256,
+    "max_val_samples": 128,
+    "vocab_size": 10000,
+    "num_workers": 0,
+    "dim": 128,
+    "num_heads": 8,
+    "num_layers": 2,
+    "learning_rate": 0.0003,
+    "epochs_per_task": 3,
+    "num_seeds": 2,
+    "replay_batch_size": 4,
+    "device": "cpu",
+    "output_json": "experiments/paper_suite/r4_dbpedia_baselines.json",
+    "tokenizer": "bpe",
+    "num_tasks": 7,
+    "method_rows_replay_batch_size": 0,
+    "er_agem_replay_batch_size": 4,
+    "lambda_grid": {
+      "ewc": [
+        100.0,
+        1000.0,
+        5000.0
+      ],
+      "si": [
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mas": [
+        0.1,
+        1.0,
+        10.0
+      ]
+    }
+  },
+  "methods": {
+    "fine_tune": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.14285714285714285,
+      "accuracy_std": 0.0,
+      "forgetting_mean": 0.5541666666666667,
+      "forgetting_std": 0.012500000000000011,
+      "backward_transfer_mean": -0.5541666666666667,
+      "backward_transfer_std": 0.012500000000000011
+    },
+    "ewc": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.14285714285714285,
+      "accuracy_std": 0.0,
+      "forgetting_mean": 0.5166666666666666,
+      "forgetting_std": 0.00833333333333336,
+      "backward_transfer_mean": -0.5166666666666666,
+      "backward_transfer_std": 0.00833333333333336,
+      "lambda_chosen": 100.0,
+      "lambda_grid": {
+        "grid": [
+          100.0,
+          1000.0,
+          5000.0
+        ],
+        "chosen_lambda": 100.0,
+        "per_lambda": {
+          "100.0": {
+            "accuracy_mean": 0.14285714285714285,
+            "forgetting_mean": 0.5166666666666666
+          },
+          "1000.0": {
+            "accuracy_mean": 0.14285714285714285,
+            "forgetting_mean": 0.5166666666666666
+          },
+          "5000.0": {
+            "accuracy_mean": 0.14285714285714285,
+            "forgetting_mean": 0.5125
+          }
+        }
+      }
+    },
+    "er": {
+      "num_runs": 2.0,
+      "accuracy_mean": 0.14285714285714285,
+      "accuracy_std": 0.0,
+      "forgetting_mean": 0.5083333333333333,
+      "forgetting_std": 0.04166666666666666,
+      "backward_transfer_mean": -0.5083333333333333,
+      "backward_transfer_std": 0.04166666666666666
+    }
+  },
+  "per_seed": {
+    "fine_tune": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5666666666666667,
+        "backward_transfer": -0.5666666666666667
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5416666666666666,
+        "backward_transfer": -0.5416666666666666
+      }
+    ],
+    "ewc": [
+      {
+        "seed": 42,
+        "lambda": 100.0,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.525,
+        "backward_transfer": -0.525
+      },
+      {
+        "seed": 43,
+        "lambda": 100.0,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5083333333333333,
+        "backward_transfer": -0.5083333333333333
+      },
+      {
+        "seed": 42,
+        "lambda": 1000.0,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.525,
+        "backward_transfer": -0.525
+      },
+      {
+        "seed": 43,
+        "lambda": 1000.0,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5083333333333333,
+        "backward_transfer": -0.5083333333333333
+      },
+      {
+        "seed": 42,
+        "lambda": 5000.0,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5166666666666667,
+        "backward_transfer": -0.5166666666666667
+      },
+      {
+        "seed": 43,
+        "lambda": 5000.0,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5083333333333333,
+        "backward_transfer": -0.5083333333333333
+      }
+    ],
+    "er": [
+      {
+        "seed": 42,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.5499999999999999,
+        "backward_transfer": -0.5499999999999999
+      },
+      {
+        "seed": 43,
+        "avg_accuracy": 0.14285714285714285,
+        "avg_forgetting": 0.4666666666666666,
+        "backward_transfer": -0.4666666666666666
+      }
+    ]
+  }
+}

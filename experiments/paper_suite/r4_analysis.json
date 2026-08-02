@@ -1,0 +1,203 @@
+{
+  "datasets": [
+    {
+      "artifact": "r4_dbpedia_longstream.json",
+      "aggregated": {
+        "no_adaptation": {
+          "num_runs": 3,
+          "accuracy_mean": 0.06547619047619048,
+          "accuracy_std": 0.02693740118805895,
+          "forgetting_mean": 0.36388888888888893,
+          "forgetting_std": 0.01039349274103871
+        },
+        "correlation": {
+          "num_runs": 3,
+          "accuracy_mean": 0.07261904761904762,
+          "accuracy_std": 0.02547730304646749,
+          "forgetting_mean": 0.3361111111111111,
+          "forgetting_std": 0.010393492741038738
+        },
+        "dual_transport": {
+          "num_runs": 3,
+          "accuracy_mean": 0.05952380952380953,
+          "accuracy_std": 0.02374992540864286,
+          "forgetting_mean": 0.3611111111111111,
+          "forgetting_std": 0.01416394309331331
+        },
+        "meta_secant": {
+          "num_runs": 3,
+          "accuracy_mean": 0.0630952380952381,
+          "accuracy_std": 0.02109529184127304,
+          "forgetting_mean": 0.35555555555555557,
+          "forgetting_std": 0.02389534796400728
+        }
+      },
+      "stage_correlations": [
+        {
+          "transport_gap": 0.43692726992382996,
+          "mean_abs_excess": 0.43692794677936514,
+          "routing_stability": 0.34013632116044396,
+          "seed": 42
+        },
+        {
+          "transport_gap": -0.32238633747999484,
+          "mean_abs_excess": -0.32238488511162666,
+          "routing_stability": 0.4398874938228206,
+          "seed": 43
+        },
+        {
+          "transport_gap": -0.5489289124392932,
+          "mean_abs_excess": -0.548929443964487,
+          "routing_stability": 0.3488916469257552,
+          "seed": 44
+        }
+      ],
+      "pooled": {
+        "transport_gap": {
+          "n": 3,
+          "mean": -0.14479599333181936,
+          "std": 0.4216094961192552
+        },
+        "mean_abs_excess": {
+          "n": 3,
+          "mean": -0.14479546076558283,
+          "std": 0.4216097733297451
+        },
+        "routing_stability": {
+          "n": 3,
+          "mean": 0.3763051539696733,
+          "std": 0.04510136278957306
+        }
+      }
+    },
+    {
+      "artifact": "r4_cifar10_longstream.json",
+      "aggregated": {
+        "no_adaptation": {
+          "num_runs": 3,
+          "accuracy_mean": 0.11111111111111112,
+          "accuracy_std": 0.01571348402636772,
+          "forgetting_mean": 0.5192307692307693,
+          "forgetting_std": 0.015701857325533183
+        },
+        "correlation": {
+          "num_runs": 3,
+          "accuracy_mean": 0.10555555555555556,
+          "accuracy_std": 0.003928371006591923,
+          "forgetting_mean": 0.5224358974358975,
+          "forgetting_std": 0.019757737189003102
+        },
+        "dual_transport": {
+          "num_runs": 3,
+          "accuracy_mean": 0.1111111111111111,
+          "accuracy_std": 0.003928371006591936,
+          "forgetting_mean": 0.5224358974358975,
+          "forgetting_std": 0.019757737189003102
+        },
+        "meta_secant": {
+          "num_runs": 3,
+          "accuracy_mean": 0.10555555555555556,
+          "accuracy_std": 0.003928371006591923,
+          "forgetting_mean": 0.5192307692307693,
+          "forgetting_std": 0.015701857325533183
+        }
+      },
+      "stage_correlations": [
+        {
+          "transport_gap": 0.48349969350879,
+          "mean_abs_excess": 0.483500165674388,
+          "routing_stability": 0.9072812363405596,
+          "seed": 42
+        },
+        {
+          "transport_gap": 0.8857989603859113,
+          "mean_abs_excess": 0.8857991694861644,
+          "routing_stability": 0.19724675833031644,
+          "seed": 43
+        },
+        {
+          "transport_gap": 0.9859346017379492,
+          "mean_abs_excess": 0.9859346502306526,
+          "routing_stability": -0.8171215047967993,
+          "seed": 44
+        }
+      ],
+      "pooled": {
+        "transport_gap": {
+          "n": 3,
+          "mean": 0.7850777518775502,
+          "std": 0.21713095992104162
+        },
+        "mean_abs_excess": {
+          "n": 3,
+          "mean": 0.7850779951304018,
+          "std": 0.21713078860529011
+        },
+        "routing_stability": {
+          "n": 3,
+          "mean": 0.09580216329135886,
+          "std": 0.7076295913387987
+        }
+      }
+    },
+    {
+      "artifact": "r4_dbpedia_notransport",
+      "aggregated": {
+        "no_transport": {
+          "num_runs": 3,
+          "accuracy_mean": 0.13452380952380952,
+          "accuracy_std": 0.01178511301977579,
+          "forgetting_mean": 0.41111111111111115,
+          "forgetting_std": 0.051520102752753906
+        }
+      },
+      "stage_correlations": [],
+      "pooled": {}
+    },
+    {
+      "artifact": "r4_cifar10_notransport",
+      "aggregated": {
+        "no_transport": {
+          "num_runs": 3,
+          "accuracy_mean": 0.10833333333333332,
+          "accuracy_std": 0.006804138174397715,
+          "forgetting_mean": 0.5192307692307693,
+          "forgetting_std": 0.015701857325533183
+        }
+      },
+      "stage_correlations": [],
+      "pooled": {}
+    },
+    {
+      "artifact": "r4_dbpedia_baselines.json",
+      "aggregated": {
+        "fine_tune": {
+          "num_runs": 2,
+          "accuracy_mean": 0.14285714285714285,
+          "accuracy_std": 0.0,
+          "forgetting_mean": 0.5541666666666667,
+          "forgetting_std": 0.012500000000000011
+        },
+        "ewc": {
+          "num_runs": 2,
+          "accuracy_mean": 0.14285714285714285,
+          "accuracy_std": 0.0,
+          "forgetting_mean": 0.5166666666666666,
+          "forgetting_std": 0.00833333333333336
+        },
+        "er": {
+          "num_runs": 2,
+          "accuracy_mean": 0.14285714285714285,
+          "accuracy_std": 0.0,
+          "forgetting_mean": 0.5083333333333333,
+          "forgetting_std": 0.04166666666666666
+        }
+      },
+      "stage_correlations": [],
+      "pooled": {}
+    }
+  ],
+  "config": {
+    "stage_corr_method": "pearson"
+  }
+}

@@ -171,7 +171,6 @@ class AGNewsDataset(LongTextDataset):
                 cls._dummy_dataset(max_length, tokenizer, max_samples=max_samples),
                 "synthetic_fallback",
             )
-
         try:
             hf_token = (
                 os.getenv("HF_TOKEN")
@@ -229,7 +228,82 @@ class AGNewsDataset(LongTextDataset):
             )
 
 
+class CIFAR10PixelDataset(Dataset):
+    """CIFAR-10 rendered as 16x16 grayscale pixel tokens.
 
+    Each 32x32 RGB image is converted to a 16x16 grayscale grid and flattened
+    into ``max_length`` integer tokens in ``[0, 255]``, so the image benchmark
+    reuses the same token-embedding backbone as the text benchmark.
+    """
+
+    def __init__(
+        self,
+        split: str = "train",
+        max_length: int = 256,
+        max_samples: Optional[int] = None,
+    ):
+        self.max_length = max_length
+        self.images: List[List[int]] = []
+        self.labels: List[int] = []
+        try:
+            from datasets import load_dataset
+        except ImportError as exc:
+            print(f"datasets not installed ({exc}); CIFAR-10 requires the HF cache.")
+            _require_fallback_permission("cifar10")
+            self.data_source = "synthetic_fallback"
+            return
+        try:
+            ds = load_dataset("cifar10", split=split)
+            num_labels = 10
+            if max_samples is None:
+                for item in ds:
+                    img = item["img"].convert("L").resize((16, 16))
+                    self.images.append([int(value) for value in list(img.getdata())])
+                    self.labels.append(int(item["label"]))
+            else:
+                target_per_label = max(1, (max_samples + num_labels - 1) // num_labels)
+                label_buckets = {label: [] for label in range(num_labels)}
+                for item in ds:
+                    label = int(item["label"])
+                    if len(label_buckets[label]) >= target_per_label:
+                        continue
+                    img = item["img"].convert("L").resize((16, 16))
+                    label_buckets[label].append(
+                        [int(value) for value in list(img.getdata())]
+                    )
+                    if all(
+                        len(bucket) >= target_per_label
+                        for bucket in label_buckets.values()
+                    ):
+                        break
+                # Guarantee at least one sample per class, then fill up to the cap.
+                for label in range(num_labels):
+                    if label_buckets[label]:
+                        self.images.append(label_buckets[label][0])
+                        self.labels.append(label)
+                for label in range(num_labels):
+                    for tokens in label_buckets[label][1:]:
+                        if len(self.images) >= max_samples:
+                            break
+                        self.images.append(tokens)
+                        self.labels.append(label)
+                    if len(self.images) >= max_samples:
+                        break
+            self.data_source = "huggingface"
+        except Exception as exc:
+            print(f"Error loading CIFAR-10 ({type(exc).__name__}: {exc}); fallback disabled by default.")
+            _require_fallback_permission("cifar10")
+            self.data_source = "synthetic_fallback"
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, idx: int):
+        tokens = self.images[idx][: self.max_length]
+        tokens = tokens + [0] * (self.max_length - len(tokens))
+        return torch.tensor(tokens, dtype=torch.long), torch.tensor(
+            self.labels[idx], dtype=torch.long
+        )
 class DBPediaDataset(LongTextDataset):
     """DBPedia ontology classification with balanced sampling and fallback samples."""
 
@@ -550,6 +624,17 @@ def get_continual_dataloaders(
             max_length=max_length,
             max_samples=max_val_samples,
             tokenizer=tokenizer,
+        )
+    elif dataset_name == "split_cifar10":
+        train_dataset = CIFAR10PixelDataset(
+            split="train",
+            max_length=max_length,
+            max_samples=max_train_samples,
+        )
+        val_dataset = CIFAR10PixelDataset(
+            split="test",
+            max_length=max_length,
+            max_samples=max_val_samples,
         )
     else:
         raise ValueError(f"Unknown continual dataset: {dataset_name}")

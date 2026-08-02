@@ -35,6 +35,7 @@ from asam.continual_baselines import EWC, MAS, SI
 from experiments.run_continual_text_benchmark import (
     RealBenchmarkArgs,
     get_continual_dataloaders,
+    infer_num_output_classes,
     run_benchmark,
 )
 from experiments.train_continual_asam import compute_continual_metrics, set_seed
@@ -42,9 +43,13 @@ from experiments.train_continual_asam import compute_continual_metrics, set_seed
 
 @dataclass
 class BaselineComparisonArgs:
+    protocol: str = "task_incremental_multihead"
     dataset_name: str = "split_ag_news"
     classes_per_task: int = 2
     label_mode: str = "local"
+    head_mode: str = "multi"
+    train_task_id_mode: str = "oracle"
+    eval_task_id_mode: str = "oracle"
     max_length: int = 128
     batch_size: int = 8
     max_train_samples: int = 64
@@ -81,6 +86,7 @@ class TaskHeadTransformer(nn.Module):
         num_heads: int = 4,
         num_tasks: int = 2,
         classes_per_task: int = 2,
+        head_mode: str = "multi",
         max_len: int = 128,
         dropout: float = 0.1,
     ):
@@ -101,9 +107,15 @@ class TaskHeadTransformer(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.norm = nn.LayerNorm(dim)
-        self.heads = nn.ModuleList(
-            [nn.Linear(dim, classes_per_task) for _ in range(num_tasks)]
-        )
+        self.head_mode = head_mode
+        if head_mode == "multi":
+            self.heads = nn.ModuleList(
+                [nn.Linear(dim, classes_per_task) for _ in range(num_tasks)]
+            )
+        elif head_mode == "single":
+            self.heads = nn.ModuleList([nn.Linear(dim, classes_per_task)])
+        else:
+            raise ValueError(f"Unsupported head_mode: {head_mode}")
 
     def forward(
         self,
@@ -115,6 +127,8 @@ class TaskHeadTransformer(nn.Module):
         hidden = self.embed(x) + self.pos(torch.arange(seq_len, device=device))
         hidden = self.encoder(hidden)
         pooled = self.norm(hidden.mean(dim=1))
+        if self.head_mode == "single":
+            return self.heads[0](pooled)
         per_head_logits = torch.stack([head(pooled) for head in self.heads], dim=1)
         if task_ids is None:
             task_ids = torch.full((batch,), self.task_id, dtype=torch.long, device=device)
@@ -159,14 +173,17 @@ def project_gradients(main_grads: List[Optional[torch.Tensor]], ref_grads: List[
                 g.add_(r, alpha=-float(coefficient))
 
 
-def build_model(args: BaselineComparisonArgs, num_tasks: int) -> TaskHeadTransformer:
+def build_model(
+    args: BaselineComparisonArgs, num_tasks: int, num_classes: int
+) -> TaskHeadTransformer:
     return TaskHeadTransformer(
         vocab_size=args.vocab_size,
         dim=args.dim,
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         num_tasks=num_tasks,
-        classes_per_task=args.classes_per_task,
+        classes_per_task=num_classes,
+        head_mode=args.head_mode,
         max_len=args.max_length,
     )
 
@@ -178,12 +195,13 @@ def run_vanilla_baseline(
     train_loaders,
     val_loaders,
     regularizer_lambda: Optional[float] = None,
+    num_classes: int = 2,
 ) -> Dict[str, float]:
     """Train fine_tune/EWC/SI/MAS/ER/A-GEM on the shared protocol."""
     device = torch.device(args.device)
     set_seed(seed)
     num_tasks = len(train_loaders)
-    model = build_model(args, num_tasks).to(device)
+    model = build_model(args, num_tasks, num_classes).to(device)
 
     cl_info = None
     if method_name == "ewc":
@@ -258,7 +276,7 @@ def run_vanilla_baseline(
                     memory.add_batch(inputs, labels)
 
         model.eval()
-        row: List[float] = []
+        row: List[float] = [0.0 for _ in range(num_tasks)]
         with torch.no_grad():
             for seen_task in range(task_id + 1):
                 model.task_id = seen_task
@@ -270,7 +288,7 @@ def run_vanilla_baseline(
                     logits = model(inputs)
                     correct += (logits.argmax(dim=-1) == labels).sum().item()
                     total += labels.size(0)
-                row.append(correct / max(1, total))
+                row[seen_task] = correct / max(1, total)
         accuracy_matrix.append(row)
 
     return compute_continual_metrics(accuracy_matrix, num_tasks)
@@ -288,13 +306,13 @@ def run_asam_row(
     isolates the routing mechanism; ER/A-GEM provide the replay-based reference.
     """
     benchmark_args = RealBenchmarkArgs(
-        protocol="task_incremental_multihead",
+        protocol=args.protocol,
         dataset_name=args.dataset_name,
         classes_per_task=args.classes_per_task,
         label_mode=args.label_mode,
-        head_mode="multi",
-        train_task_id_mode="oracle",
-        eval_task_id_mode="oracle",
+        head_mode=args.head_mode,
+        train_task_id_mode=args.train_task_id_mode,
+        eval_task_id_mode=args.eval_task_id_mode,
         max_length=args.max_length,
         batch_size=args.batch_size,
         max_train_samples=args.max_train_samples,
@@ -344,7 +362,7 @@ def build_markdown_table(methods: Dict[str, Dict[str, object]]) -> str:
         "| Method | Accuracy (mean?std) | Forgetting (mean?std) | BWT (mean?std) | Runs | Lambda |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for name in ["fine_tune", "ewc", "si", "mas", "er", "agem", "task_routing", "prototype"]:
+    for name in methods:
         row = methods[name]
         lam = row.get("lambda_chosen", "")
         lines.append(
@@ -365,9 +383,20 @@ def build_markdown_table(methods: Dict[str, Dict[str, object]]) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--protocol", default="task_incremental_multihead")
+    parser.add_argument("--dataset-name", default="split_ag_news")
+    parser.add_argument("--classes-per-task", type=int, default=2)
+    parser.add_argument("--label-mode", default="local")
+    parser.add_argument("--head-mode", default="multi")
+    parser.add_argument("--train-task-id-mode", default="oracle")
+    parser.add_argument("--eval-task-id-mode", default="oracle")
+    parser.add_argument("--max-length", type=int, default=128)
+    parser.add_argument("--methods", default="")
     parser.add_argument("--num-seeds", type=int, default=2)
     parser.add_argument("--epochs-per-task", type=int, default=1)
     parser.add_argument("--dim", type=int, default=64)
+    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--num-layers", type=int, default=1)
     parser.add_argument("--max-train-samples", type=int, default=64)
     parser.add_argument("--max-val-samples", type=int, default=32)
     parser.add_argument("--vocab-size", type=int, default=128)
@@ -379,9 +408,19 @@ def main():
     args = parser.parse_args()
 
     config = BaselineComparisonArgs(
+        protocol=args.protocol,
+        dataset_name=args.dataset_name,
+        classes_per_task=args.classes_per_task,
+        label_mode=args.label_mode,
+        head_mode=args.head_mode,
+        train_task_id_mode=args.train_task_id_mode,
+        eval_task_id_mode=args.eval_task_id_mode,
+        max_length=args.max_length,
         num_seeds=args.num_seeds,
         epochs_per_task=args.epochs_per_task,
         dim=args.dim,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
         max_train_samples=args.max_train_samples,
         max_val_samples=args.max_val_samples,
         vocab_size=args.vocab_size,
@@ -403,7 +442,12 @@ def main():
     )
     num_tasks = len(train_loaders)
 
-    methods = ["fine_tune", "ewc", "si", "mas", "er", "agem", "task_routing", "prototype"]
+    all_methods = ["fine_tune", "ewc", "si", "mas", "er", "agem", "task_routing", "prototype"]
+    methods = [m.strip() for m in args.methods.split(",") if m.strip()] if args.methods else all_methods
+    if config.head_mode == "single":
+        num_classes = infer_num_output_classes(train_loaders + val_loaders)
+    else:
+        num_classes = config.classes_per_task
     per_seed: Dict[str, List[Dict[str, object]]] = {m: [] for m in methods}
     lambda_grid_results: Dict[str, Dict[str, object]] = {}
 
@@ -427,6 +471,7 @@ def main():
                         train_loaders,
                         val_loaders,
                         regularizer_lambda=lam,
+                        num_classes=num_classes,
                     )
                     rows.append({"seed": seed, "lambda": lam, **metrics})
                 agg = aggregate(rows)
@@ -451,7 +496,14 @@ def main():
             for seed_offset in range(config.num_seeds):
                 seed = 42 + seed_offset
                 if method in ("fine_tune", "er", "agem"):
-                    metrics = run_vanilla_baseline(method, config, seed, train_loaders, val_loaders)
+                    metrics = run_vanilla_baseline(
+                        method,
+                        config,
+                        seed,
+                        train_loaders,
+                        val_loaders,
+                        num_classes=num_classes,
+                    )
                     seed_output = None
                 else:
                     seed_output = str(
